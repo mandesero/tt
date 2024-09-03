@@ -23,28 +23,37 @@ type StatusCtx struct {
 	Orchestrator replicaset.Orchestrator
 }
 
-// Status shows a replicaset status.
-func Status(statusCtx StatusCtx) error {
+func GetReplicasets(statusCtx StatusCtx) (replicaset.Replicasets, error) {
+	var replicasets replicaset.Replicasets
 	orchestratorType, err := getOrchestratorType(statusCtx.Orchestrator,
 		statusCtx.Conn, statusCtx.RunningCtx)
 	if err != nil {
-		return err
+		return replicasets, err
 	}
 
 	var orchestrator replicasetOrchestrator
 	if statusCtx.IsApplication {
 		if orchestrator, err = makeApplicationOrchestrator(
 			orchestratorType, statusCtx.RunningCtx, nil, nil); err != nil {
-			return err
+			return replicasets, err
 		}
 	} else {
 		if orchestrator, err = makeInstanceOrchestrator(
 			orchestratorType, statusCtx.Conn); err != nil {
-			return err
+			return replicasets, err
 		}
 	}
 
-	replicasets, err := orchestrator.Discovery(replicaset.SkipCache)
+	replicasets, err = orchestrator.Discovery(replicaset.SkipCache)
+	if err != nil {
+		return replicasets, err
+	}
+	return replicasets, err
+}
+
+// Status shows a replicaset status.
+func Status(statusCtx StatusCtx) error {
+	replicasets, err := GetReplicasets(statusCtx)
 	if err != nil {
 		return err
 	}
