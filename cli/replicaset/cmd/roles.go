@@ -59,11 +59,11 @@ func RolesChange(ctx RolesChangeCtx, changeRoleAction replicaset.RolesChangerAct
 	var orchestrator replicasetOrchestrator
 	if ctx.IsApplication {
 		if orchestrator, err = makeApplicationOrchestrator(
-			orchestratorType, ctx.RunningCtx, ctx.Collectors, ctx.Publishers); err != nil {
+			orchestratorType, ctx.RunningCtx, ctx.Collectors, ctx.Publishers, connector.ConnectOpts{}); err != nil {
 			return err
 		}
 	} else {
-		if orchestrator, err = makeInstanceOrchestrator(orchestratorType, ctx.Conn); err != nil {
+		if orchestrator, err = makeInstanceOrchestrator(orchestratorType, ctx.Conn, connector.ConnectOpts{}); err != nil {
 			return err
 		}
 	}

@@ -612,11 +612,24 @@ func internalReplicasetStatusModule(cmdCtx *cmdcontext.CmdCtx, args []string) er
 	if ctx.IsInstanceConnect {
 		defer ctx.Conn.Close()
 	}
+
+	connectCtx := connect.ConnectCtx{
+		Username:    replicasetUser,
+		Password:    replicasetPassword,
+		SslKeyFile:  replicasetSslKeyFile,
+		SslCertFile: replicasetSslCertFile,
+		SslCaFile:   replicasetSslCaFile,
+		SslCiphers:  replicasetSslCiphers,
+	}
+	var connOpts connector.ConnectOpts
+	connOpts, _, _ = resolveConnectOpts(cmdCtx, cliOpts, &connectCtx, args)
+
 	return replicasetcmd.Status(replicasetcmd.DiscoveryCtx{
 		IsApplication: ctx.IsApplication,
 		RunningCtx:    ctx.RunningCtx,
 		Conn:          ctx.Conn,
 		Orchestrator:  ctx.Orchestrator,
+		ConnOpts:      connOpts,
 	})
 }
 

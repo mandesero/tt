@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/apex/log"
+	"github.com/tarantool/tt/cli/connector"
 	"github.com/tarantool/tt/cli/replicaset"
 	"github.com/tarantool/tt/cli/running"
 )
@@ -47,7 +48,7 @@ func Bootstrap(ctx BootstapCtx) error {
 	}
 
 	orchestrator, err := makeApplicationOrchestrator(orchestratorType,
-		ctx.RunningCtx, nil, nil)
+		ctx.RunningCtx, nil, nil, connector.ConnectOpts{})
 	if err != nil {
 		return err
 	}

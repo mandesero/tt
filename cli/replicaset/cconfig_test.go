@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tarantool/tt/cli/connector"
 	"github.com/tarantool/tt/cli/replicaset"
 	"github.com/tarantool/tt/cli/running"
 )
@@ -29,14 +30,14 @@ var _ replicaset.Bootstrapper = &replicaset.CConfigApplication{}
 var _ replicaset.RolesChanger = &replicaset.CConfigApplication{}
 
 func TestCconfigApplication_Bootstrap(t *testing.T) {
-	app := replicaset.NewCConfigApplication(running.RunningCtx{}, nil, nil)
+	app := replicaset.NewCConfigApplication(running.RunningCtx{}, nil, nil, connector.ConnectOpts{})
 	err := app.Bootstrap(replicaset.BootstrapCtx{})
 	assert.EqualError(t, err,
 		`bootstrap is not supported for an application by "centralized config" orchestrator`)
 }
 
 func TestCConfigInstance_Bootstrap(t *testing.T) {
-	app := replicaset.NewCConfigInstance(nil)
+	app := replicaset.NewCConfigInstance(nil, connector.ConnectOpts{})
 	err := app.Bootstrap(replicaset.BootstrapCtx{})
 	assert.EqualError(t, err,
 		`bootstrap is not supported for a single instance by "centralized config" orchestrator`)
@@ -294,7 +295,7 @@ func TestCConfigInstance_Discovery(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			instance := replicaset.NewCConfigInstance(tc.Evaler)
+			instance := replicaset.NewCConfigInstance(tc.Evaler, connector.ConnectOpts{})
 			replicasets, err := instance.Discovery(replicaset.SkipCache)
 			assert.NoError(t, err)
 			assert.Equal(t, tc.Expected, replicasets)
@@ -318,7 +319,7 @@ func TestCConfigInstance_Discovery_force(t *testing.T) {
 		},
 	}
 
-	getter := replicaset.NewCConfigInstance(evaler)
+	getter := replicaset.NewCConfigInstance(evaler, connector.ConnectOpts{})
 
 	replicasets, err := getter.Discovery(replicaset.SkipCache)
 	require.NoError(t, err)
@@ -386,7 +387,7 @@ func TestCConfigInstance_Discovery_failover(t *testing.T) {
 				},
 			}
 
-			getter := replicaset.NewCConfigInstance(evaler)
+			getter := replicaset.NewCConfigInstance(evaler, connector.ConnectOpts{})
 
 			replicasets, err := getter.Discovery(replicaset.SkipCache)
 			assert.NoError(t, err)
@@ -438,7 +439,7 @@ func TestCConfigInstance_Discovery_errors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			instance := replicaset.NewCConfigInstance(tc.Evaler)
+			instance := replicaset.NewCConfigInstance(tc.Evaler, connector.ConnectOpts{})
 			_, err := instance.Discovery(replicaset.SkipCache)
 			assert.ErrorContains(t, err, tc.Expected)
 		})
@@ -450,20 +451,20 @@ func TestCConfigInstance_Promote_error(t *testing.T) {
 	evaler := &instanceMockEvaler{
 		Error: []error{err},
 	}
-	instance := replicaset.NewCConfigInstance(evaler)
+	instance := replicaset.NewCConfigInstance(evaler, connector.ConnectOpts{})
 	actual := instance.Promote(replicaset.PromoteCtx{})
 	require.ErrorIs(t, actual, err)
 }
 
 func TestCConfigInstance_Demote(t *testing.T) {
-	instance := replicaset.NewCConfigInstance(nil)
+	instance := replicaset.NewCConfigInstance(nil, connector.ConnectOpts{})
 	err := instance.Demote(replicaset.DemoteCtx{})
 	require.EqualError(t, err,
 		`demote is not supported for a single instance by "centralized config" orchestrator`)
 }
 
 func TestCConfigInstance_Expel(t *testing.T) {
-	instance := replicaset.NewCConfigInstance(nil)
+	instance := replicaset.NewCConfigInstance(nil, connector.ConnectOpts{})
 	err := instance.Expel(replicaset.ExpelCtx{})
 	assert.EqualError(t, err,
 		`expel is not supported for a single instance by "centralized config" orchestrator`)
@@ -489,7 +490,7 @@ func TestCConfigInstance_RolesChange(t *testing.T) {
 		},
 	}
 
-	instance := replicaset.NewCConfigInstance(nil)
+	instance := replicaset.NewCConfigInstance(nil, connector.ConnectOpts{})
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

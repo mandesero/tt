@@ -39,7 +39,7 @@ func Demote(ctx DemoteCtx) error {
 	}
 
 	orchestrator, err := makeApplicationOrchestrator(orchestratorType,
-		ctx.RunningCtx, ctx.Collectors, ctx.Publishers)
+		ctx.RunningCtx, ctx.Collectors, ctx.Publishers, connector.ConnectOpts{})
 	if err != nil {
 		return err
 	}

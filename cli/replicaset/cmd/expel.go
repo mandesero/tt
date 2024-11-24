@@ -5,6 +5,7 @@ import (
 
 	"github.com/apex/log"
 
+	"github.com/tarantool/tt/cli/connector"
 	"github.com/tarantool/tt/cli/replicaset"
 	"github.com/tarantool/tt/cli/running"
 	libcluster "github.com/tarantool/tt/lib/cluster"
@@ -39,7 +40,7 @@ func Expel(expelCtx ExpelCtx) error {
 	}
 
 	orchestrator, err := makeApplicationOrchestrator(orchestratorType,
-		expelCtx.RunningCtx, expelCtx.Collectors, expelCtx.Publishers)
+		expelCtx.RunningCtx, expelCtx.Collectors, expelCtx.Publishers, connector.ConnectOpts{})
 	if err != nil {
 		return err
 	}

@@ -30,14 +30,15 @@ func makeApplicationOrchestrator(
 	orchestratorType replicaset.Orchestrator,
 	runningCtx running.RunningCtx,
 	collectors libcluster.DataCollectorFactory,
-	publishers libcluster.DataPublisherFactory) (replicasetOrchestrator, error) {
+	publishers libcluster.DataPublisherFactory,
+	connOpts connector.ConnectOpts) (replicasetOrchestrator, error) {
 	var (
 		orchestrator replicasetOrchestrator
 		err          error
 	)
 	switch orchestratorType {
 	case replicaset.OrchestratorCentralizedConfig:
-		orchestrator = replicaset.NewCConfigApplication(runningCtx, collectors, publishers)
+		orchestrator = replicaset.NewCConfigApplication(runningCtx, collectors, publishers, connOpts)
 	case replicaset.OrchestratorCartridge:
 		orchestrator = replicaset.NewCartridgeApplication(runningCtx)
 	case replicaset.OrchestratorCustom:
@@ -50,14 +51,14 @@ func makeApplicationOrchestrator(
 
 // makeInstanceOrchestrator creates an orchestrator for the single instance.
 func makeInstanceOrchestrator(orchestratorType replicaset.Orchestrator,
-	conn connector.Connector) (replicasetOrchestrator, error) {
+	conn connector.Connector, connOpts connector.ConnectOpts) (replicasetOrchestrator, error) {
 	var (
 		orchestrator replicasetOrchestrator
 		err          error
 	)
 	switch orchestratorType {
 	case replicaset.OrchestratorCentralizedConfig:
-		orchestrator = replicaset.NewCConfigInstance(conn)
+		orchestrator = replicaset.NewCConfigInstance(conn, connOpts)
 	case replicaset.OrchestratorCartridge:
 		orchestrator = replicaset.NewCartridgeInstance(conn)
 	case replicaset.OrchestratorCustom:

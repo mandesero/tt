@@ -59,7 +59,8 @@ type cconfigInstance struct {
 // CConfigInstance is an instance with the centralized config orchestrator.
 type CConfigInstance struct {
 	cachedDiscoverer
-	evaler connector.Evaler
+	evaler   connector.Evaler
+	connOpts connector.ConnectOpts
 }
 
 // patchRoleTarget describes a role content to patch a config.
@@ -71,9 +72,11 @@ type patchRoleTarget struct {
 }
 
 // NewCConfigInstance create a new CConfigInstance object for the evaler.
-func NewCConfigInstance(evaler connector.Evaler) *CConfigInstance {
+func NewCConfigInstance(evaler connector.Evaler,
+	connOpts connector.ConnectOpts) *CConfigInstance {
 	inst := &CConfigInstance{
-		evaler: evaler,
+		evaler:   evaler,
+		connOpts: connOpts,
 	}
 	inst.discoverer = inst
 	return inst
@@ -82,7 +85,7 @@ func NewCConfigInstance(evaler connector.Evaler) *CConfigInstance {
 // discovery returns a replicasets topology for a single instance with
 // the centralized config orchestrator.
 func (c *CConfigInstance) discovery() (Replicasets, error) {
-	topology, err := getCConfigInstanceTopology(c.evaler)
+	topology, err := getCConfigInstanceTopology(c.evaler, c.connOpts)
 	if err != nil {
 		return Replicasets{}, err
 	}
@@ -149,17 +152,20 @@ type CConfigApplication struct {
 	runningCtx running.RunningCtx
 	publishers libcluster.DataPublisherFactory
 	collectors libcluster.DataCollectorFactory
+	connOpts   connector.ConnectOpts
 }
 
 // NewCConfigApplication creates a new CConfigApplication object.
 func NewCConfigApplication(
 	runningCtx running.RunningCtx,
 	collectors libcluster.DataCollectorFactory,
-	publishers libcluster.DataPublisherFactory) *CConfigApplication {
+	publishers libcluster.DataPublisherFactory,
+	connOpts connector.ConnectOpts) *CConfigApplication {
 	app := &CConfigApplication{
 		runningCtx: runningCtx,
 		publishers: publishers,
 		collectors: collectors,
+		connOpts:   connOpts,
 	}
 	app.discoverer = app
 	return app
@@ -172,7 +178,8 @@ func (c *CConfigApplication) discovery() (Replicasets, error) {
 
 	err := EvalForeachAlive(c.runningCtx.Instances, InstanceEvalFunc(
 		func(ictx running.InstanceCtx, evaler connector.Evaler) (bool, error) {
-			topology, err := getCConfigInstanceTopology(evaler)
+			topology, err := getCConfigInstanceTopology(evaler,
+				connector.ConnectOpts{})
 			if err != nil {
 				return true, err
 			}
@@ -245,7 +252,8 @@ func (c *CConfigApplication) Expel(ctx ExpelCtx) error {
 }
 
 // getCConfigInstanceTopology returns a topology for an instance.
-func getCConfigInstanceTopology(evaler connector.Evaler) (cconfigTopology, error) {
+func getCConfigInstanceTopology(evaler connector.Evaler,
+	connOpts connector.ConnectOpts) (cconfigTopology, error) {
 	var topology cconfigTopology
 
 	args := []any{}
@@ -266,6 +274,32 @@ func getCConfigInstanceTopology(evaler connector.Evaler) (cconfigTopology, error
 	for i, _ := range topology.Instances {
 		if topology.Instances[i].UUID == topology.InstanceUUID {
 			if topology.InstanceRW {
+				topology.Instances[i].Mode = ModeRW
+			} else {
+				topology.Instances[i].Mode = ModeRead
+			}
+		} else {
+			conn, err := connector.Connect(connector.ConnectOpts{
+				Network:  connOpts.Network,
+				Address:  topology.Instances[i].URI,
+				Username: connOpts.Username,
+				Password: connOpts.Password,
+				Ssl:      connOpts.Ssl,
+			})
+			if err != nil {
+				return topology, fmt.Errorf("instance %s failed to connect to instance:"+
+					"%w", topology.Instances[i].Alias, err)
+			}
+			res, err := conn.Eval(
+				"return (type(box.cfg) == 'function') or box.info.ro",
+				[]any{}, connector.RequestOpts{})
+			if err != nil || len(res) == 0 {
+				return topology, fmt.Errorf(
+					"can't determine RO/RW mode on instance: %s",
+					topology.Instances[i].Alias)
+			}
+			isRW := !res[0].(bool)
+			if isRW {
 				topology.Instances[i].Mode = ModeRW
 			} else {
 				topology.Instances[i].Mode = ModeRead

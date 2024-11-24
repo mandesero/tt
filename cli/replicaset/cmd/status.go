@@ -20,6 +20,8 @@ type DiscoveryCtx struct {
 	Conn connector.Connector
 	// Orchestrator is a forced orchestrator choice.
 	Orchestrator replicaset.Orchestrator
+	// Connector options
+	ConnOpts connector.ConnectOpts
 }
 
 // getReplicasets discovers and returns the list of replicasets.
@@ -32,9 +34,10 @@ func getReplicasets(ctx DiscoveryCtx) (replicaset.Replicasets, error) {
 	var orchestrator replicasetOrchestrator
 	if ctx.IsApplication {
 		orchestrator, err = makeApplicationOrchestrator(orchestratorType,
-			ctx.RunningCtx, nil, nil)
+			ctx.RunningCtx, nil, nil, ctx.ConnOpts)
 	} else {
-		orchestrator, err = makeInstanceOrchestrator(orchestratorType, ctx.Conn)
+		orchestrator, err = makeInstanceOrchestrator(orchestratorType, ctx.Conn,
+			ctx.ConnOpts)
 	}
 
 	if err != nil {
