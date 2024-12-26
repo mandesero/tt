@@ -51,7 +51,6 @@ var (
 
 	chosenReplicasetAliases []string
 	lsnTimeout              int
-	downgradeVersion        string
 
 	replicasetUriHelp = "  The URI can be specified in the following formats:\n" +
 		"  * [tcp://][username:password@][host:port]\n" +
@@ -91,7 +90,7 @@ func newUpgradeCmd() *cobra.Command {
 // newDowngradeCmd creates a "replicaset downgrade" command.
 func newDowngradeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "downgrade (<APP_NAME> | <URI>) [flags]\n\n" +
+		Use: "downgrade (<APP_NAME> | <URI>) VERSION [flags]\n\n" +
 			replicasetUriHelp,
 		DisableFlagsInUseLine: true,
 		Short:                 "Downgrade tarantool cluster",
@@ -99,14 +98,17 @@ func newDowngradeCmd() *cobra.Command {
 			libconnect.EnvCredentialsHelp + "\n\n",
 		Run: func(cmd *cobra.Command, args []string) {
 			var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
-			if downgradeVersion == "" {
-				err := errors.New("need to specify the version to downgrade " +
-					"use --version (-v) option")
+			if len(args) < 2 {
+				err := errors.New("you must specify both " +
+					"(<APP_NAME> | <URI>) VERSION")
 				util.HandleCmdErr(cmd, err)
 				os.Exit(1)
-			} else if !versionPattern.MatchString(downgradeVersion) {
-				err := errors.New("--version (-v) must be in the format " +
-					"'x.x.x', where x is a number")
+			}
+
+			downgradeVersion := args[1]
+			if !versionPattern.MatchString(downgradeVersion) {
+				err := errors.New("VERSION must be in the " +
+					"format 'x.x.x', where x is a number")
 				util.HandleCmdErr(cmd, err)
 				os.Exit(1)
 			}
@@ -116,7 +118,7 @@ func newDowngradeCmd() *cobra.Command {
 				internalReplicasetDowngradeModule, args)
 			util.HandleCmdErr(cmd, err)
 		},
-		Args: cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(2),
 	}
 
 	cmd.Flags().StringArrayVarP(&chosenReplicasetAliases, "replicaset", "r",
@@ -124,9 +126,6 @@ func newDowngradeCmd() *cobra.Command {
 
 	cmd.Flags().IntVarP(&lsnTimeout, "timeout", "t", 5,
 		"timeout for waiting the LSN synchronization (in seconds)")
-
-	cmd.Flags().StringVarP(&downgradeVersion, "version", "v", "",
-		"version to downgrade the schema to")
 
 	addOrchestratorFlags(cmd)
 	addTarantoolConnectFlags(cmd)
@@ -608,6 +607,9 @@ func internalReplicasetUpgradeModule(cmdCtx *cmdcontext.CmdCtx, args []string) e
 // internalReplicasetDowngradeModule is a "upgrade" command for the replicaset module.
 func internalReplicasetDowngradeModule(cmdCtx *cmdcontext.CmdCtx, args []string) error {
 	var ctx replicasetCtx
+	downgradeVersion := args[1]
+	args = args[:1]
+
 	if err := replicasetFillCtx(cmdCtx, &ctx, args, false); err != nil {
 		return err
 	}
