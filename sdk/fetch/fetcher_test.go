@@ -1,9 +1,13 @@
 package fetch_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +45,36 @@ func TestFetchCaches(t *testing.T) {
 	got, err := fetcher.Fetch(t.Context(), "http://127.0.0.1:1/elsewhere", strings.ToUpper(sum))
 	require.NoError(t, err)
 	assert.Equal(t, body, got)
+}
+
+func TestFetchRetriesTruncatedDownload(t *testing.T) {
+	t.Parallel()
+
+	body := []byte("module bytes")
+	var hits atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		if hits.Add(1) == 1 {
+			_, _ = w.Write(body[:len(body)-1])
+
+			return
+		}
+
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+
+	sum := fetch.SHA256(body)
+	fetcher := fetch.Fetcher{CacheDir: t.TempDir()}
+	data, err := fetcher.Fetch(t.Context(), server.URL, sum)
+	require.NoError(t, err)
+	assert.Equal(t, body, data)
+
+	cached, err := os.ReadFile(filepath.Join(fetcher.CacheDir, sum))
+	require.NoError(t, err)
+	assert.Equal(t, body, cached)
+	assert.Equal(t, int32(2), hits.Load())
 }
 
 func TestFetchChecksum(t *testing.T) {

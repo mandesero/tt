@@ -4,16 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 const (
 	// cacheDirPerm and cacheFilePerm are the modes the cache is written with.
 	cacheDirPerm  os.FileMode = 0o755
 	cacheFilePerm os.FileMode = 0o644
+	downloadTries             = 3
+	retryDelay                = 250 * time.Millisecond
 )
 
 // Fetcher downloads files of a known SHA-256 and keeps the checked copies in
@@ -49,7 +54,7 @@ func (f Fetcher) Fetch(ctx context.Context, url, sum string) ([]byte, error) {
 		}
 	}
 
-	data, err := f.Client.Bytes(ctx, url)
+	data, err := f.download(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +69,31 @@ func (f Fetcher) Fetch(ctx context.Context, url, sum string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// download retries a dropped connection from the start. Bytes buffers each
+// attempt, so a partial download cannot reach callers or the cache.
+func (f Fetcher) download(ctx context.Context, url string) ([]byte, error) {
+	for attempt := 1; ; attempt++ {
+		data, err := f.Client.Bytes(ctx, url)
+		if attempt == downloadTries || !droppedConnection(err) {
+			return data, err
+		}
+
+		timer := time.NewTimer(time.Duration(attempt) * retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			return nil, fmt.Errorf("download %s: %w", url, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func droppedConnection(err error) bool {
+	return errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, io.EOF)
 }
 
 // SHA256 returns the SHA-256 of data in lowercase hex, the form Fetch checks.
