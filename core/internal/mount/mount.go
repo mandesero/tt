@@ -23,10 +23,14 @@ package mount
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -466,20 +470,30 @@ type hook = func(*cobra.Command, []string) error
 // wrapHooks makes cmd's error-returning hooks hand their error to the core:
 // cobra is told to print neither the error nor the usage, since the core
 // reports the error itself and prints the usage only for a usage error.
+// Hooks also receive a context that lets them stop their work on a signal.
 func wrapHooks(cmd *cobra.Command) {
 	for _, target := range []*hook{
 		&cmd.PersistentPreRunE, &cmd.PreRunE, &cmd.RunE, &cmd.PostRunE, &cmd.PersistentPostRunE,
 	} {
 		if *target != nil {
-			*target = silenced(*target)
+			*target = managedHook(*target)
 		}
 	}
 }
 
-// silenced returns run with cobra's error and usage printing turned off for
-// the command that failed.
-func silenced(run hook) hook {
+func managedHook(run hook) hook {
 	return func(cmd *cobra.Command, args []string) error {
+		parent := cmd.Context()
+		ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		// Release this subscription on cancellation so the hook does not
+		// keep tt from terminating on a later signal.
+		release := context.AfterFunc(ctx, stop)
+		defer release()
+
+		cmd.SetContext(ctx)
+		defer cmd.SetContext(parent)
+
 		err := run(cmd, args)
 		if err != nil {
 			cmd.SilenceErrors = true

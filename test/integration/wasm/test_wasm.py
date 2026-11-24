@@ -15,10 +15,12 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import threading
+import time
 import tomllib
 from pathlib import Path
 
@@ -398,10 +400,13 @@ def prepare_component(
     tt_cmd,
     project: Path,
     language: str,
-    image: str,
+    image: str | None,
     *runtime: str,
     env: dict | None = None,
 ):
+    runner = ("--runner", "local")
+    if image is not None:
+        runner = ("--runner", "docker", "--platform", "linux/amd64", "--image", image)
     run(
         tt_cmd,
         project,
@@ -411,12 +416,7 @@ def prepare_component(
         "0.1.0",
         "--lang",
         language,
-        "--runner",
-        "docker",
-        "--platform",
-        "linux/amd64",
-        "--image",
-        image,
+        *runner,
         *runtime,
         env=env,
     )
@@ -450,13 +450,8 @@ def installed_component(project: Path, tree: Path | None = None) -> Path:
     return scope / ".rocks" / "share" / "tarantool" / name / "dist" / "calc.wasm"
 
 
-def test_prepared_python_builds_and_packs_offline(tt_cmd, tmp_path, project, env, asset_server):
-    """Bind and pack work with cached SDK and a mirror of the runtime."""
-    arch = host_platform()[2]
-    root, url, server = asset_server
-    registry = f"{url}/rocks/"
-    rock = f"wasm-0.1.0-1.{arch}.rock"
-    mirror = ".tarantool/registry"
+@pytest.fixture()
+def fake_builder(tmp_path, env):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
@@ -464,8 +459,17 @@ def test_prepared_python_builds_and_packs_offline(tt_cmd, tmp_path, project, env
     docker.write_text(f"#!{sys.executable}\n{fake_docker}")
     docker.chmod(0o755)
     trace = tmp_path / "docker.log"
-    env = {**env, "PATH": f"{bin_dir}:{env['PATH']}", "TT_WASM_TEST_DOCKER_LOG": str(trace)}
+    return {**env, "PATH": f"{bin_dir}:{env['PATH']}", "TT_WASM_TEST_DOCKER_LOG": str(trace)}, trace
 
+
+def test_prepared_python_builds_and_packs_offline(tt_cmd, project, fake_builder, asset_server):
+    """Bind and pack work with cached SDK and a mirror of the runtime."""
+    arch = host_platform()[2]
+    root, url, server = asset_server
+    registry = f"{url}/rocks/"
+    rock = f"wasm-0.1.0-1.{arch}.rock"
+    mirror = ".tarantool/registry"
+    env, trace = fake_builder
     add_sdk(Path(env["TT_WASM_RELEASES"]), root)
     run(tt_cmd, project, "wasm", "rock", "--out", str(root / "rocks"), env=env)
     prepare_component(tt_cmd, project, "python", IMAGE, "--rock-server", registry, env=env)
@@ -535,6 +539,56 @@ def test_prepared_python_builds_and_packs_offline(tt_cmd, tmp_path, project, env
     assert output.read_bytes() == installed_component(project).read_bytes() == COMPONENT
 
 
+def test_interrupted_bind_keeps_previous_bindings(tt_cmd, tmp_path, project, fake_builder, assets):
+    env, _ = fake_builder
+    root, url = assets
+    add_sdk(Path(env["TT_WASM_RELEASES"]), root)
+    run(tt_cmd, project, "wasm", "rock", "--out", str(root / "rocks"), env=env)
+    prepare_component(tt_cmd, project, "python", IMAGE, "--rock-server", f"{url}/rocks/", env=env)
+    run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+
+    ready = tmp_path / "binding-workdir"
+    with subprocess.Popen(
+        [tt_cmd, "wasm", "bind", "calc"],
+        cwd=project,
+        env={**env, "TT_WASM_TEST_WAIT_FOR_SIGNAL": str(ready)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as command:
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and command.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert ready.is_file()
+            command.terminate()
+            stdout, stderr = command.communicate(timeout=10)
+            assert command.returncode > 0, stdout + stderr
+        finally:
+            # The builder can keep the pipes open if tt exits before it.
+            try:
+                os.killpg(command.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    assert not Path(ready.read_text()).exists()
+    run(tt_cmd, project, "wasm", "bind", "calc", "--check", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+
+
+COMPONENT_SOURCES = {
+    "c": ("main.c", "int32_t a, int32_t b", "int32_t a, int32_t b, int32_t offset"),
+    "cpp": ("main.cpp", "int32_t a, int32_t b", "int32_t a, int32_t b, int32_t offset"),
+    "csharp": ("src/Implementation.cs", "int a, int b", "int a, int b, int offset"),
+    "go": ("main.go", "a, b int32", "a, b, offset int32"),
+    "js": ("main.js", "a, b", "a, b, offset"),
+    "python": ("main.py", "a: int, b: int", "a: int, b: int, offset: int"),
+    "rust": ("src/lib.rs", "a: i32, b: i32", "a: i32, b: i32, offset: i32"),
+}
+
+
 def component_builder_image(language: str):
     image_var = f"TT_WASM_TEST_{language.upper()}_IMAGE"
     image = os.environ.get(image_var)
@@ -544,7 +598,7 @@ def component_builder_image(language: str):
         id=language,
         marks=pytest.mark.skipif(
             not image,
-            reason=f"set {image_var} to a locally built {language} builder image",
+            reason=f"set {image_var} to a released digest or local {language} builder image",
         ),
     )
 
@@ -552,36 +606,173 @@ def component_builder_image(language: str):
 @pytest.mark.docker
 @pytest.mark.parametrize(
     ("language", "image"),
-    [
-        component_builder_image(language)
-        for language in ("python", "js", "go", "rust", "c", "cpp", "csharp")
-    ],
+    [component_builder_image(language) for language in COMPONENT_SOURCES],
 )
 def test_component_calls_from_installed_package(tt_cmd, tmp_path, language, image):
-    """The default component from a real builder image survives pack and install."""
+    """A component built with a real builder image survives pack and install."""
+    project, env = develop_component(tt_cmd, tmp_path, language, image)
+    run(tt_cmd, project, "package", "pack", "--locked", "--rebuild", env=env)
+
+    (archive,) = (project / "_build" / "pack").glob("*.tt")
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    run(tt_cmd, installed, "new", env=env)
+    run(tt_cmd, installed, "package", "install", str(archive), env=env)
+    call_add(tt_cmd, installed, installed_component(project, installed), "20, 22, 6", 48, env)
+
+
+@pytest.mark.parametrize("language", COMPONENT_SOURCES)
+def test_local_component_development(tt_cmd, tmp_path, language):
+    env_var = f"TT_WASM_TEST_{language.upper()}_LOCAL_ENV"
+    env_file = os.environ.get(env_var)
+    if not env_file:
+        pytest.skip(f"set {env_var} to a JSON toolchain environment")
+    develop_component(tt_cmd, tmp_path, language, None, json.loads(Path(env_file).read_text()))
+
+
+def call_add(tt_cmd, project, artifact, args, expected, env):
+    command = (
+        "local wasm = require('wasm'); "
+        f"local calc = wasm.load({json.dumps(str(artifact))}); "
+        f"assert(wasm.call(calc, 'add', {args}) == {expected}); os.exit()"
+    )
+    run(tt_cmd, project, "run", "-e", command, env=env)
+
+
+def develop_component(tt_cmd, tmp_path, language, image, toolchain_env=None):
     os_name, arch, *_ = host_platform()
     if (os_name, arch) == ("linux", "arm64"):
         pytest.skip("tarantool-wasm 0.1.0 has no Linux arm64 build")
     project = tmp_path / "app"
     project.mkdir()
-    run(tt_cmd, project, "new")
-    prepare_component(tt_cmd, project, language, image)
-    run(tt_cmd, project, "wasm", "fetch", "calc")
-    run(tt_cmd, project, "wasm", "bind", "calc")
-    run(tt_cmd, project, "wasm", "bind", "calc", "--check")
-    run(tt_cmd, project, "package", "build", "--locked")
-    assert installed_component(project).read_bytes().startswith(COMPONENT)
-    run(tt_cmd, project, "package", "pack", "--locked", "--rebuild")
+    env = {**os.environ, **(toolchain_env or {})}
+    mirror = env.get("TT_WASM_TEST_RUNTIME_ROCK_SERVER")
+    runtime = ("--rock-server", str(Path(mirror).resolve())) if mirror else ()
+    run(tt_cmd, project, "new", env=env)
+    prepare_component(tt_cmd, project, language, image, *runtime, env=env)
+    run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", "--check", env=env)
 
-    (archive,) = (project / "_build" / "pack").glob("*.tt")
-    installed = tmp_path / "installed"
-    installed.mkdir()
-    run(tt_cmd, installed, "new")
-    run(tt_cmd, installed, "package", "install", str(archive))
-    component = installed_component(project, installed)
-    command = (
-        "local wasm = require('wasm'); "
-        f"local calc = wasm.load({json.dumps(str(component))}); "
-        "assert(wasm.call(calc, 'add', 20, 22) == 42); os.exit()"
+    guest = project / "components" / "calc"
+    artifact = installed_component(project)
+    output = guest / "dist" / "calc.wasm"
+    source_name, old_signature, new_signature = COMPONENT_SOURCES[language]
+    source = guest / source_name
+    wit = guest / "wit" / "app.wit"
+    locks = [project / name for name in ("app.manifest.lock", "wasm.lock.json")]
+    original_locks = [lock.read_bytes() for lock in locks]
+
+    run(tt_cmd, project, "package", "build", "--locked", env=env)
+    assert artifact.read_bytes().startswith(COMPONENT)
+    call_add(tt_cmd, project, artifact, "20, 22", 42, env)
+    run(tt_cmd, project, "wasm", "build", "calc", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22", 42, env)
+
+    original_source = source.read_text()
+    assert "a + b" in original_source and old_signature in original_source
+    source.write_text(original_source.replace("a + b", "a * 2 + b"))
+    run(tt_cmd, project, "wasm", "build", "calc", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22", 62, env)
+
+    original_wit = wit.read_text()
+    new_wit = original_wit.replace("b: s32)", "b: s32, offset: s32)")
+    assert new_wit != original_wit
+    wit.write_text(new_wit)
+    stale = tt(tt_cmd, project, "wasm", "bind", "calc", "--check", env=env)
+    assert stale.returncode != 0 and "missing or changed bindings" in stale.stderr
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", "--check", env=env)
+    new_source = original_source.replace(old_signature, new_signature)
+    new_source = new_source.replace("a + b", "a + b + offset")
+    source.write_text(new_source)
+    run(tt_cmd, project, "package", "build", "--locked", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
+
+    digest = sha256_of(artifact)
+    assert sha256_of(output) == digest
+    wit.write_text(new_wit.replace("offset: s32", "offset: missing-type"))
+    invalid_wit = tt(tt_cmd, project, "wasm", "build", "calc", env=env)
+    assert invalid_wit.returncode != 0
+    assert "missing-type" in invalid_wit.stderr or "failed to parse package" in invalid_wit.stderr
+    wit.write_text(new_wit)
+    source.write_text(new_source + "\n! invalid source !\n")
+    failed = tt(tt_cmd, project, "package", "build", "--locked", env=env)
+    assert failed.returncode != 0 and "calc" in failed.stderr
+    assert sha256_of(output) == sha256_of(artifact) == digest
+    source.write_text(new_source)
+
+    run(tt_cmd, project, "wasm", "clean", "calc", env=env)
+    assert not output.exists() and not artifact.exists()
+    assert not (guest / ".tt-wasm" / "bindings").exists()
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+    run(tt_cmd, project, "wasm", "build", "calc", "--rebuild", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
+    assert [lock.read_bytes() for lock in locks] == original_locks
+    if language == "js":
+        change_npm_dependencies(tt_cmd, project, guest, artifact, image, env)
+
+    return project, env
+
+
+def change_npm_dependencies(tt_cmd, project, guest, artifact, image, env):
+    source = guest / "main.js"
+    lock = guest / "package-lock.json"
+    code = source.read_text()
+    cli = ["npm"]
+    if image is not None:
+        cli = [
+            "docker",
+            "run",
+            "--rm",
+            "--pull=never",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "--env",
+            "HOME=/tmp",
+            "--entrypoint",
+            "npm",
+            "--workdir",
+            "/guest",
+            "--mount",
+            f"type=bind,source={guest},target=/guest",
+            "--",
+            image,
+        ]
+
+    def npm(*args):
+        result = subprocess.run(
+            [*cli, *args, "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"],
+            cwd=guest,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    dependency_code = code.replace(
+        "return a + b + offset;",
+        'return camelcaseKeys({"a-value": a}).aValue + b + offset + 1;',
     )
-    run(tt_cmd, installed, "run", "-e", command)
+    source.write_text("import camelcaseKeys from 'camelcase-keys';\n" + dependency_code)
+    for version in ("9.1.2", "9.1.3"):
+        npm("install", "--save-exact", f"camelcase-keys@{version}")
+        before = lock.read_bytes()
+        packages = json.loads(before)["packages"]
+        assert packages["node_modules/camelcase-keys"]["version"] == version
+        assert "node_modules/map-obj" in packages
+        stale = tt(tt_cmd, project, "wasm", "build", "calc", env=env)
+        assert stale.returncode != 0 and "run tt wasm fetch" in stale.stderr
+        run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
+        run(tt_cmd, project, "wasm", "build", "calc", env=env)
+        call_add(tt_cmd, project, artifact, "20, 22, 6", 49, env)
+        assert lock.read_bytes() == before
+
+    npm("uninstall", "camelcase-keys")
+    assert "node_modules/map-obj" not in json.loads(lock.read_bytes())["packages"]
+    source.write_text(code)
+    run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
+    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
+    run(tt_cmd, project, "wasm", "build", "calc", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)

@@ -11,9 +11,18 @@ The runtime requires Tarantool 3.6 or newer on Linux x86-64 or macOS arm64.
 
 ## Prepare the project
 
-The default runner uses Docker. From the root of the tt checkout, download
-the [tt-wasm module](https://github.com/mandesero/tt-wasm) pinned in `go.mod`
-and build its Python toolchain image with the tt SDK:
+The default runner uses Docker. Download `builder-images.json` from the
+[tt-wasm release](https://github.com/mandesero/tt-wasm/releases/tag/v0.1.0).
+In the application directory containing `app.manifest.toml`, select the
+released Python builder by digest:
+
+```console
+$ image=$(jq -er '.images[] | select(.target == "python") | .reference' builder-images.json)
+$ tt wasm prepare --lang python --image "$image"
+```
+
+For a development image, build the [tt-wasm module](https://github.com/mandesero/tt-wasm)
+pinned in `go.mod` from the root of the tt checkout:
 
 ```console
 $ go mod download github.com/mandesero/tt-wasm
@@ -22,7 +31,7 @@ $ docker build --build-context "tt-sdk=$PWD/sdk" --platform linux/amd64 \
     --target python -t tt-wasm-builder:dev "$wasm_dir"
 ```
 
-In the application directory containing `app.manifest.toml`:
+Select that image from the application directory:
 
 ```console
 $ tt wasm prepare --lang python --image tt-wasm-builder:dev
@@ -118,6 +127,55 @@ All local toolchains also need `wasm-tools` 1.261.0 and `wkg` 0.16.1. For
 local C# builds use Linux amd64 and set `WASI_SDK_PATH` to the WASI SDK
 root. A project can also lock external WIT packages in `wkg.lock`.
 
+## Change dependencies
+
+Use the language's package manager in the component directory to update its
+manifest and lockfile. Commit both. Return to the application directory and
+run `tt wasm fetch calc` before binding or building with the new dependencies.
+For example, use `npm install --package-lock-only lodash-es@4.17.23` to add
+a JavaScript dependency, or `cargo add serde@1.0.228` in a Rust component.
+Go and Rust package managers need the SDK published by `tt wasm bind`.
+In an older Rust component that refers to `.tt-wasm-sdk-rust` in
+`Cargo.toml`, update the SDK path to `.tt-wasm/bindings/tarantool-sdk` and
+run `tt wasm fetch calc` and `tt wasm bind calc` before editing locks with
+Cargo.
+For C#, regenerate the NuGet lockfile after changing references with
+`dotnet restore -p:RestoreLockedMode=false`.
+
+Python's `requirements.lock` must pin and hash every wheel, including
+transitive dependencies. The supported wheels are pure Python and must
+install for the guest Python version. JavaScript fetch installs production
+dependencies from the lockfile with npm lifecycle scripts disabled. C and
+C++ can use headers supplied with the component or WASI-compatible libraries
+compiled separately and passed to Clang through the component's build
+arguments. Build the libraries for WASI Preview 2 with the WASI SDK and
+place the headers and archives in the component. Relative compiler and
+linker paths are resolved from the component directory in both runners.
+
+```toml
+[components.calc.build.args]
+build = ["-Ivendor/include", "-Lvendor/lib", "-lxxhash"]
+```
+
+Docker fetch uses the builder's package managers and writes the cache in
+the project. Subsequent Docker builds reuse that cache across containers.
+After changing runners, fetch again before building. For example, after
+preparing the same component in Docker, switch to the installed local
+toolchain with:
+
+```console
+$ tt wasm prepare --lang js --runner local
+$ tt wasm fetch calc
+$ tt wasm bind calc
+$ tt package build --locked
+```
+
+Use `tt wasm prepare --lang js --runner docker` to switch back to the
+previously pinned image. The `--runner` option on `fetch`, `bind`, or
+`build` selects a runner for that invocation. Each runner has a separate
+dependency cache. Run `tt wasm bind` again for the active runner before
+checking its generated bindings.
+
 ## Write it
 
 The generated `components/calc/wit/app.wit` declares the export:
@@ -144,7 +202,12 @@ class WitWorld(wit_world.WitWorld):
 
 Use `tt wasm bind calc` to generate bindings in
 `components/calc/.tt-wasm/bindings/` for editing and inspection. A build
-generates the bindings it needs in a temporary directory.
+generates the bindings it needs in a temporary directory. After editing WIT,
+run `tt wasm bind calc` and update the implementation to match. If you
+changed a WIT dependency or its lockfile, run `tt wasm fetch calc` first.
+
+`tt wasm clean calc` removes generated bindings and build outputs. You can
+then generate fresh bindings and build again with the fetched dependencies.
 
 ## Build it and call it from Lua
 
@@ -166,6 +229,10 @@ $ tt run -e "local wasm = require('wasm') \
     print(wasm.call(calc, 'add', 20, 22)) os.exit()"
 42
 ```
+
+Tarantool uses `;` and `?` in Lua module search paths. Use an application
+path without those characters if you want `require('wasm')` to find the
+installed runtime through the standard search path.
 
 `wasm.bind(calc)` gives Lua functions for the exports of the component.
 Use `wasm.drop(calc)` to release a component you no longer need.

@@ -178,7 +178,8 @@ func TestConstruct(t *testing.T) {
 
 // TestStandardBackends checks that the core has no build backend of its
 // own, and that the standard modules give tt its backends: those of the
-// module build, make and shell first, which run the hooks.
+// module build, make and shell first, which run the hooks, and the wasm
+// backend from the wasm module.
 func TestStandardBackends(t *testing.T) {
 	t.Parallel()
 
@@ -190,13 +191,18 @@ func TestStandardBackends(t *testing.T) {
 
 	_, registry, err = construct(standard.Modules(), &atomic.Bool{}, noVersion)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"make", "shell", "c", "cargo", "cmake", "go", "lua-c", "zig"},
+	assert.Equal(t, []string{"make", "shell", "c", "cargo", "cmake", "go", "lua-c", "zig", "wasm"},
 		registry.Names())
 
 	for _, name := range registry.Names() {
 		backend, module, ok := registry.Backend(name)
 		require.True(t, ok, name)
-		assert.Equal(t, "build", module, name)
+		owner := "build"
+		if name == "wasm" {
+			owner = "wasm"
+		}
+
+		assert.Equal(t, owner, module, name)
 		assert.Equal(t, name == "make" || name == "shell", backend.Hook, name)
 	}
 }

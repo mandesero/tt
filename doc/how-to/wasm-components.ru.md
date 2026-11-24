@@ -12,9 +12,18 @@ macOS arm64.
 
 ## Подготовка проекта {#prepare-the-project}
 
-По умолчанию tt запускает инструменты сборки в Docker. Из корня репозитория
-tt загрузите [модуль tt-wasm](https://github.com/mandesero/tt-wasm) в версии
-из `go.mod` и соберите образ Python с SDK из tt:
+По умолчанию tt запускает инструменты сборки в Docker. Загрузите
+`builder-images.json` из [релиза tt-wasm](https://github.com/mandesero/tt-wasm/releases/tag/v0.1.0).
+В каталоге приложения с `app.manifest.toml` выберите образ Python по дайджесту:
+
+```console
+$ image=$(jq -er '.images[] | select(.target == "python") | .reference' builder-images.json)
+$ tt wasm prepare --lang python --image "$image"
+```
+
+Чтобы собрать образ для разработки, из корня репозитория tt загрузите
+[модуль tt-wasm](https://github.com/mandesero/tt-wasm) в версии из `go.mod`
+и соберите образ Python с SDK из tt:
 
 ```console
 $ go mod download github.com/mandesero/tt-wasm
@@ -23,7 +32,7 @@ $ docker build --build-context "tt-sdk=$PWD/sdk" --platform linux/amd64 \
     --target python -t tt-wasm-builder:dev "$wasm_dir"
 ```
 
-В каталоге приложения с `app.manifest.toml` выполните:
+Выберите этот образ из каталога приложения:
 
 ```console
 $ tt wasm prepare --lang python --image tt-wasm-builder:dev
@@ -121,6 +130,55 @@ $ tt package build --locked
 0.16.1. Для C# в local-режиме нужна Linux amd64. Укажите корень WASI SDK
 в `WASI_SDK_PATH`. Внешние WIT-пакеты можно зафиксировать в `wkg.lock`.
 
+## Изменение зависимостей {#change-dependencies}
+
+Обновите манифест и локфайл менеджером пакетов в каталоге компонента.
+Сохраните оба файла в системе контроля версий. Вернитесь в каталог
+приложения и выполните `tt wasm fetch calc`, чтобы загрузить зависимости
+для генерации привязок и сборки. Например, для JavaScript используйте
+`npm install --package-lock-only lodash-es@4.17.23`, а для Rust —
+`cargo add serde@1.0.228`. Менеджерам пакетов Go и Rust нужен SDK,
+который публикует `tt wasm bind`. Если в старом Rust-компоненте в
+`Cargo.toml` указан путь `.tt-wasm-sdk-rust`, замените его на
+`.tt-wasm/bindings/tarantool-sdk` и выполните `tt wasm fetch calc` и
+`tt wasm bind calc` перед обновлением локфайла Cargo.
+Для C# после изменения ссылок на пакеты пересоздайте локфайл командой
+`dotnet restore -p:RestoreLockedMode=false`.
+
+В `requirements.lock` укажите точные версии и хеши всех Python-пакетов,
+включая транзитивные зависимости. Используйте wheels на чистом Python,
+совместимые с версией Python гостевой среды. Менеджер пакетов npm
+устанавливает зафиксированные рабочие зависимости без запуска скриптов
+жизненного цикла. Для C и C++ можно использовать заголовки из каталога
+компонента или отдельно скомпилировать WASI-библиотеки и передать их
+Clang в аргументах сборки.
+Соберите библиотеки для WASI Preview 2 с помощью WASI SDK и поместите
+заголовки и архивы в каталог компонента. В обеих средах относительные
+пути компилятора и компоновщика отсчитываются от каталога компонента.
+
+```toml
+[components.calc.build.args]
+build = ["-Ivendor/include", "-Lvendor/lib", "-lxxhash"]
+```
+
+В режиме Docker команда `fetch` запускает менеджеры пакетов в контейнере
+и сохраняет кэш в проекте. Повторные сборки в новых контейнерах используют
+этот кэш. При смене среды выполните `fetch` заново. Например, чтобы
+переключить JS-компонент с Docker на локальную сборку:
+
+```console
+$ tt wasm prepare --lang js --runner local
+$ tt wasm fetch calc
+$ tt wasm bind calc
+$ tt package build --locked
+```
+
+`tt wasm prepare --lang js --runner docker` возвращает ранее
+зафиксированный образ. Параметр `--runner` у команд `fetch`, `bind` и
+`build` выбирает среду для одного вызова. Для каждой среды используется
+свой кэш зависимостей. Перед проверкой привязок сгенерируйте их заново
+для выбранной среды.
+
 ## Написание компонента {#write-it}
 
 В файле `components/calc/wit/app.wit` объявлен экспорт:
@@ -147,7 +205,13 @@ class WitWorld(wit_world.WitWorld):
 
 `tt wasm bind calc` записывает привязки для редактора и проверки
 в `components/calc/.tt-wasm/bindings/`. Во время сборки tt генерирует
-необходимые привязки во временном каталоге.
+необходимые привязки во временном каталоге. После изменения WIT вызовите
+`tt wasm bind calc` и обновите реализацию. Если изменилась зависимость WIT
+или её локфайл, сначала выполните `tt wasm fetch calc`.
+
+`tt wasm clean calc` удаляет сгенерированные привязки и результаты сборки.
+Затем можно заново создать привязки и собрать компонент с уже загруженными
+зависимостями.
 
 ## Сборка и вызов из Lua {#build-it-and-call-it-from-lua}
 
@@ -169,6 +233,10 @@ $ tt run -e "local wasm = require('wasm') \
     print(wasm.call(calc, 'add', 20, 22)) os.exit()"
 42
 ```
+
+В путях поиска Lua-модулей Tarantool использует символы `;` и `?`.
+Выберите путь к приложению без этих символов, чтобы `require('wasm')`
+находил установленный модуль стандартным способом.
 
 `wasm.bind(calc)` предоставляет функции Lua для экспортов компонента.
 `wasm.drop(calc)` освобождает компонент, который больше не нужен.

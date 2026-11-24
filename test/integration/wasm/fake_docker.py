@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -38,6 +39,11 @@ with Path(os.environ["TT_WASM_TEST_DOCKER_LOG"]).open("a") as log:
 
 work = host_path(request["work"])
 cache = host_path(request["cache"])
+if operation == "bind" and (ready := os.environ.get("TT_WASM_TEST_WAIT_FOR_SIGNAL")):
+    Path(ready).write_text(str(work))
+    signal.pause()
+    sys.exit("expected SIGTERM")
+
 if operation == "fetch":
     assert (cache / "sdk").is_dir()
     for path in ("wit", "python-sdk", "site-packages"):

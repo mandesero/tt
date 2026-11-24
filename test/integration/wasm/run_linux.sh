@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Build the pinned Wasm module's toolchain images and check pack, install and a Lua call.
+# Exercise component development, packaging, installation and Lua calls in Docker.
 set -euo pipefail
 
 usage() {
     cat <<'EOF'
 Usage: test/integration/wasm/run_linux.sh [python js go rust c cpp csharp]
 
-With no languages, run the full matrix on Linux x86-64. The offline mirror
+With no languages, run the Docker matrix on Linux x86-64. The offline mirror
 test runs with every selection. Requires Docker, Tarantool 3.6 or newer on PATH,
 Python with test/requirements.txt installed, and Go to fetch the Wasm
 module. Requires Mage to build tt when no existing binary is supplied.
 
 Set PYTEST_ADDOPTS=--tt-cmd=/path/to/tt to test an existing binary.
 Set TT_TEST_TARANTOOL to select a version or executable through Mage.
-Set TT_WASM_TEST_<LANG>_IMAGE to use a prebuilt local image for a language.
+Set TT_WASM_TEST_<LANG>_IMAGE to use a released digest or prebuilt local image.
+Set TT_WASM_TEST_RUNTIME_ROCK_SERVER to use a local runtime rock mirror.
 EOF
 }
 
