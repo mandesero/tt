@@ -157,7 +157,7 @@ it pins, and repairs a `.rocks/` an older tt left out of step with its
 manifest.
 
 - A build backend finds the programs of the project's `.tarantool/bin` -
-  what `tt binary` and `tt wasm prepare` installed - ahead of `PATH`, with or
+  what `tt binary` installed - ahead of `PATH`, with or
   without `.env/activate.sh`. The build of a dependency rock finds the
   project's `tarantool` there as well: a rock that runs `tarantool` by
   name, as the cmake of a rock that looks for it does, runs that one.
@@ -264,10 +264,10 @@ A `make` or `shell` build of a component, whatever it makes, can be
 skipped when nothing it depends on changed since its last build:
 
 ```toml
-[components.calc.build]
+[components.generator.build]
 backend = "shell"
-command = "tarawasm"
-args = ["all"]
+command = "sh"
+args = ["build.sh"]
 incremental = true
 ```
 
@@ -279,7 +279,7 @@ Before it builds such a component, `tt package build` hashes its inputs:
 
 Some files are not inputs:
 
-- the hidden ones, at any depth: `.git`, `.tarawasm`, the `.gitignore` files
+- the hidden ones, at any depth: `.git`, `.tt-wasm`, the `.gitignore` files
   themselves;
 - those of a `_build/` or a `_runtime/` directory;
 - those the `.gitignore` files ignore - those of the project and of the
@@ -329,8 +329,7 @@ the components it cleans.
 
 A component whose build writes files no `.gitignore` ignores gets another
 hash at every build, and is built every time, as if it were not
-incremental. `tt wasm new` writes the `.gitignore` of a WebAssembly
-component, and declares it incremental.
+incremental.
 
 ### Cleaning
 

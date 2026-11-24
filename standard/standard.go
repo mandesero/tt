@@ -1,7 +1,6 @@
-// Package standard lists the standard modules of tt: the modules of tt's
-// repository the official tt is built with, and which a distribution of tt
-// takes by default ([distribution].standard of tt.manifest.toml), at the
-// commit of its core.
+// Package standard lists the modules the official tt is built with and
+// which a distribution takes by default ([distribution].standard in
+// tt.manifest.toml). The core pins their versions.
 //
 // The core's own commands, builtin, are not in the list: they are
 // core.Builtin, and this package does not import the core, so that the
@@ -23,20 +22,19 @@
 package standard
 
 import (
+	wasm "github.com/mandesero/tt-wasm"
 	"github.com/tarantool/tt/modules/aeon"
 	"github.com/tarantool/tt/modules/build"
 	"github.com/tarantool/tt/modules/coredump"
 	"github.com/tarantool/tt/modules/emmylua"
-	"github.com/tarantool/tt/modules/wasm"
 )
 
 // Modules returns the standard modules by name, a new map on each call:
 // the caller may add to it and delete from it. A value is the constructor
 // of the module, of either type core.Modules takes: an sdk.Constructor or
 // an sdk.ModuleConstructor. build has the build backends of tt: the core
-// has none of its own. wasm has tt wasm and the check of the .wasm files of
-// a package; the components tt wasm new declares are built by the shell
-// backend of build.
+// has none of its own. wasm provides tt wasm, the wasm build backend and
+// the check of the .wasm files of a package.
 func Modules() map[string]any {
 	return map[string]any{
 		"aeon":     aeon.New,

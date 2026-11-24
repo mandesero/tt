@@ -58,8 +58,9 @@ and a `cargo` build `CARGO_TARGET_DIR`, `_build/cargo/`, unless
 | `XDG_CACHE_HOME` | `tt wasm` caches what it downloads in `tt/wasm/` of it, `~/.cache/tt/wasm` by default; `~/Library/Caches/tt/wasm` on macOS. `tt emmylua` keeps the programs it runs outside a project, and their configuration, in `tt/emmylua/` of it (see [Layout](layout.md#the-user-cache)) |
 
 The file of `TT_WASM_RELEASES` maps a version to its release: the native
-module of each platform, checked against its sha256, and the SDK archive the
-rockspec of the `wasm` rock points at. An asset is downloaded from
+module of each platform with its SHA-256 checksum and the SDK archive the
+rockspec of the `wasm` rock points at. `tt wasm fetch` checks the SDK archive
+against `sdk_sha256`. An asset is downloaded from
 `<base_url>/v<version>/<asset>`; without `base_url`, from the releases of
 tarantool-wasm-rs on GitHub.
 
@@ -71,6 +72,7 @@ tarantool-wasm-rs on GitHub.
     "base_url": "https://mirror.example.com/tarantool-wasm",
     "sdk_asset": "tarantool-wasm-0.1.0-sdk.tar.gz",
     "sdk_md5": "f986e42dd8d430110c06e9fb2963209b",
+    "sdk_sha256": "7fed52ae5edb6309e5a45e2eacc185d9437752f423076f482f307cb6f779850e",
     "platforms": [
       {
         "goos": "linux",

@@ -51,8 +51,9 @@ CMake 4 отказывается конфигурировать проект, з
 | `XDG_CACHE_HOME` | `tt wasm` кэширует скачанные файлы в подкаталоге `tt/wasm/`, по умолчанию `~/.cache/tt/wasm`; на macOS - в `~/Library/Caches/tt/wasm`. `tt emmylua` хранит программы, которые запускает вне проекта, и их конфигурацию в подкаталоге `tt/emmylua/` (см. [Структуру каталогов](layout.md#the-user-cache)) |
 
 Файл из `TT_WASM_RELEASES` сопоставляет версию с её релизом: нативный модуль
-для каждой платформы со своей контрольной суммой sha256 и архив SDK, на
-который указывает rockspec rock-модуля `wasm`. Скачивание идёт по адресу
+для каждой платформы со своей контрольной суммой SHA-256 и архив SDK,
+на который указывает rockspec rock-модуля `wasm`. `tt wasm fetch`
+сверяет архив SDK с `sdk_sha256`. Скачивание идёт по адресу
 `<base_url>/v<version>/<asset>`; без `base_url` - из релизов
 tarantool-wasm-rs на GitHub.
 
@@ -64,6 +65,7 @@ tarantool-wasm-rs на GitHub.
     "base_url": "https://mirror.example.com/tarantool-wasm",
     "sdk_asset": "tarantool-wasm-0.1.0-sdk.tar.gz",
     "sdk_md5": "f986e42dd8d430110c06e9fb2963209b",
+    "sdk_sha256": "7fed52ae5edb6309e5a45e2eacc185d9437752f423076f482f307cb6f779850e",
     "platforms": [
       {
         "goos": "linux",

@@ -895,8 +895,8 @@ func checkJSON(_ context.Context, path string) (string, error) {
 ⨯ /home/me/myapp/_build/rock/default/lua/myapp/settings.json is not valid JSON
 ```
 
-Стандартный модуль `wasm` аналогично проверяет файлы `.wasm`
-(`modules/wasm/filecheck.go`). В нём есть проверка и команды, но нет бэкенда.
+Стандартный модуль `wasm` использует этот механизм для проверки файлов
+`.wasm`. Код проверки находится в [репозитории tt-wasm](https://github.com/mandesero/tt-wasm/blob/f23e74dc6e005d7548433f087ddaaa30c4988207/filecheck.go).
 
 ## Тестирование {#test-it}
 
@@ -1061,7 +1061,7 @@ Tarantool CLI version 3.0.0-alpha.2, linux/amd64. commit: 2f4ff650 (v3.0.0-alpha
   builtin   (devel)  github.com/tarantool/tt/v3
   emmylua   (devel)  github.com/tarantool/tt/modules/emmylua
   template  (devel)  example.com/tt-template
-  wasm      (devel)  github.com/tarantool/tt/modules/wasm
+  wasm      v0.0.0-20261124141423-f23e74dc6e00  github.com/mandesero/tt-wasm
 ```
 
 В `[core]` можно также указать коммит: `tt = "<commit>"`. Дистрибутив

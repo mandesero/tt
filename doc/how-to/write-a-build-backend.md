@@ -960,8 +960,8 @@ the file:
 ⨯ /home/me/myapp/_build/rock/default/lua/myapp/settings.json is not valid JSON
 ```
 
-The standard module `wasm` checks the `.wasm` files so
-(`modules/wasm/filecheck.go`). It has a check and commands, and no backend.
+The standard module `wasm` uses this hook to check `.wasm` files. The check
+lives in the [tt-wasm repository](https://github.com/mandesero/tt-wasm/blob/f23e74dc6e005d7548433f087ddaaa30c4988207/filecheck.go).
 
 ## Test it
 
@@ -1133,7 +1133,7 @@ Tarantool CLI version 3.0.0-alpha.2, linux/amd64. commit: 2f4ff650 (v3.0.0-alpha
   coredump  (devel)  github.com/tarantool/tt/modules/coredump
   emmylua   (devel)  github.com/tarantool/tt/modules/emmylua
   template  (devel)  example.com/tt-template
-  wasm      (devel)  github.com/tarantool/tt/modules/wasm
+  wasm      v0.0.0-20261124141423-f23e74dc6e00  github.com/mandesero/tt-wasm
 ```
 
 `[core]` may name a commit instead, `tt = "<commit>"`. The distribution

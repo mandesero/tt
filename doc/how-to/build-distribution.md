@@ -118,16 +118,12 @@ Tarantool CLI core version 3.0.0. commit: 9031d7ad96d9 (v3.0.1-0.20261028190206-
 
 ## Standard modules
 
-The standard modules are the modules of the core's repository that the
-official tt is built with, `aeon`, `build`, `coredump`, `emmylua` and `wasm`
-now. The core lists them in its package `standard`, and a distribution takes
-them all by default, at the commit of the core, so it gets the ones a newer
-core adds without an edit of its manifest. `build` has the build backends of
-tt, from `make` and `shell` to `cargo` and `go`: the core has none of its
-own, and a distribution without `build` lays out the Lua of a package but
-builds no component with a build block and runs no hook. `wasm` has
-`tt wasm` and the check of the `.wasm` files of a package; the components
-`tt wasm new` adds are built by the `shell` backend of `build`.
+The official tt is built with the standard modules `aeon`, `build`,
+`coredump`, `emmylua` and `wasm`. The core lists them in its package
+`standard` and pins their versions. A distribution takes them all by default,
+including modules added by a newer core. `build` provides general-purpose backends such as
+`make`, `shell`, `cargo` and `go`. `wasm` provides the `tt wasm`
+commands, the `wasm` build backend and checks for `.wasm` files.
 `[distribution].exclude` leaves some out, by name:
 
 ```toml

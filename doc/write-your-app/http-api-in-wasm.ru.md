@@ -18,14 +18,16 @@ notes/
 ├── app.manifest.toml
 ├── app/
 │   └── init.lua                # модуль Lua: space и компонент
-├── router/                     # компонент, созданный командой tt wasm new
+├── components/router/          # компонент, созданный командой tt wasm new
 │   ├── main.py
 │   └── wit/app.wit
 └── .templates/default/
     └── config.yaml             # экземпляр
 ```
 
-Нужны Linux x86-64 или macOS arm64 (Linux arm64 не поддерживается), Tarantool 3.6 или новее и Python 3.10 или новее; компиляторы Python-компонентов tt устанавливает в проект. Описание команды `tt wasm` см. в разделе [Запуск компонентов WebAssembly](../how-to/wasm-components.md).
+Нужен Tarantool 3.6 или новее на Linux x86-64 или macOS arm64. Соберите
+[Docker-образ](../how-to/wasm-components.md#prepare-the-project) или
+[установите локальные инструменты](../how-to/wasm-components.md#the-toolchains).
 
 ## Создание проекта {#create-the-project}
 
@@ -33,42 +35,38 @@ notes/
 $ mkdir notes && cd notes
 $ git init
 $ tt new
-created /home/me/notes/app.manifest.toml for package notes
-$ tt wasm prepare --lang python
-declared wasm 0.1.0 from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-...
-prepared for tarantool-wasm 0.1.0 (linux-x86_64)
-  rock:       from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-  tarawasm:   .tarantool/bin/tarawasm
-  toolchains: python
 ```
 
-`tt wasm prepare` объявляет модуль `wasm` зависимостью с rock-сервера, который раздаёт его rock для каждой платформы, и устанавливает в `.tarantool/` tarawasm, который собирает компонент, а также компиляторы компонентов Python. В `app.manifest.toml` нужно повысить минимальную версию Tarantool, необходимую пакету:
+В `app.manifest.toml` задайте минимальную версию Tarantool:
 
 ```toml
 [platform]
 tarantool = ">=3.6.0"
 ```
 
+Объявите зависимость от модуля исполнения `wasm` и подготовьте инструменты:
+
+```console
+$ tt wasm prepare --lang python --image tt-wasm-builder:dev
+```
+
+Если установили локальные утилиты, выполните
+`tt wasm prepare --lang python --runner local`.
+
 ## Написание маршрутизатора {#write-the-router}
 
 ```console
 $ tt wasm new router --lang python --template http
-...
-added component router in router
-next:
-  # a Lua module of the package, at the root of its namespace, uses it so:
-    local config = require('config')
-    ...
-  tt package build
 ```
 
-Команда `tt wasm new` запускает tarawasm для создания компонента в `router/` на основе SDK выпуска `wasm`, объявленного зависимостью пакета, записывает компонент в манифест и применяет к нему шаблон `http` - сервер ниже. Команда также выводит Lua-модуль, который его запускает.
+`new` создаёт маршрутизатор Python в `components/router/`, объявляет его
+в манифесте и выводит Lua-модуль, который его запускает.
 
-В world компонента `router/wit/app.wit` подключён API Tarantool из SDK и экспортирован `wasi:cli/run`: компонент - программа, которая работает до остановки, а не набор вызываемых функций.
+В файле `components/router/wit/app.wit` подключён API Tarantool из SDK
+и экспортирован `wasi:cli/run`. Компонент работает до остановки.
 
 ```wit
-package example:app@0.1.0;
+package example:router@0.1.0;
 
 world router {
   include tarantool:tarantool/guest@0.2.0;
@@ -77,7 +75,7 @@ world router {
 }
 ```
 
-`router/main.py` содержит весь сервер:
+`components/router/main.py` содержит весь сервер:
 
 ```python
 import twr_python_sdk
@@ -222,7 +220,7 @@ class Run(exports.Run):
 
 ## Написание Lua-модуля {#write-the-lua-module}
 
-`app/init.lua` - модуль, путь к которому вывела команда `tt wasm new`:
+Сохраните Lua-модуль, который вывела команда `tt wasm new`, в `app/init.lua`:
 
 ```lua
 local config = require('config')
@@ -272,28 +270,16 @@ return {}
 
 ## Объявление компонентов {#declare-the-components}
 
-В `app.manifest.toml` уже есть зависимость, добавленная командой `tt wasm prepare`, и компонент, объявленный командой `tt wasm new`; нужно добавить Lua-модуль как компонент:
+Добавьте Lua-модуль в `app.manifest.toml`:
 
 ```toml
-[dependencies]
-wasm = { version = "0.1.0", registry = "https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/" }
-
-# A WebAssembly component, made by tt wasm new and built by tarawasm.
-[components.router]
-path = "router"
-include = ["dist/router.wasm"]
-
-[components.router.build]
-backend = "shell"
-command = "tarawasm"
-args = ["all"]
-incremental = true
-
 [components.app]
 path = "app"
 ```
 
-Оба компонента находятся в пространстве имён пакета: Lua-модуль загружается через `require('notes')`, а компонент - это `dist/router.wasm` рядом с ним. Имя файла соответствует world, которому команда `tt wasm new` присваивает имя компонента. Сборка `router` запускает `tarawasm all`, только если изменился исходный файл компонента; сборка находит tarawasm в `.tarantool/bin`.
+Оба компонента находятся в пространстве имён пакета. Tarantool загружает
+Lua-модуль через `require('notes')`. Бэкенд `wasm` помещает компонент рядом
+с ним по пути `dist/router.wasm`.
 
 ## Описание экземпляра {#describe-the-instance}
 
@@ -321,7 +307,9 @@ groups:
 ## Сборка и запуск {#build-and-run}
 
 ```console
-$ tt package build
+$ tt wasm prepare
+$ tt wasm fetch router
+$ tt package build --locked
 $ tt instance start
    • Starting an instance [notes:instance-001]...
 ```
@@ -357,11 +345,14 @@ notes:instance-001: ... I> notes: "PUT /notes/1 HTTP/1.1" 200 -
 $ tt instance stop --yes
 ```
 
-Компонент пишет в журнал экземпляра через `box.log`. После изменения компонента нужны `tt package build` и перезапуск экземпляра.
+Компонент пишет в журнал экземпляра через `box.log`. После изменения компонента выполните `tt package build --locked` и перезапустите экземпляр.
 
 ## Примечания {#notes}
 
 - Сервер обрабатывает по одному подключению за раз в потоке компонента: если клиент ничего не отправляет, остальные ждут 5 секунд - таймаут подключения.
 - Доступ компонента к сети проверяется и для принимаемых подключений: `allowed_ips` должен включать адреса клиентов, а `allowed_ports` запретил бы всех клиентов, поскольку каждый подключается со своего порта. Сервер можно запустить на `127.0.0.1` и поставить перед ним proxy либо указать адреса клиентов.
-- В проект не нужно включать `.rocks/`, `.tarantool/`, `.env/` и `_build/`; `router/.gitignore` исключает файлы, создаваемые tarawasm. После checkout команда `tt wasm prepare` устанавливает tarawasm, компиляторы и SDK компонента, а `tt package build` собирает его; `tt wasm status` показывает, чего не хватает, не меняя файлы.
+- Сохраните манифест и локфайлы в Git. Файлы `.gitignore` проекта исключают
+  `wasm.local.json`, результаты сборки и сгенерированные зависимости.
+  После checkout подготовьте инструменты и выполните `tt wasm fetch router`
+  перед сборкой. Состояние подготовки и привязок показывает `tt wasm status`.
 - Rock-сервер раздаёт rock `wasm` всем машинам, поэтому пакет устанавливается в другом месте и упакованный вместе с зависимостями, как описано в руководстве [Первый пакет](../get-started/first-package.md#pack), и без них. Локальная сборка модуля (`tt wasm prepare --from`) упаковывается только для этой машины; см. [Запуск компонентов WebAssembly](../how-to/wasm-components.md#share-the-rock).

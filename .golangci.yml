@@ -402,20 +402,19 @@ linters:
             - "github.com/tarantool/tt/v3/core"
             # The standard modules tt is built with, listed once.
             - "github.com/tarantool/tt/v3/standard"
-        # The standard modules of tt: the modules of its repository, and
-        # nothing of the core, which the core's internal tests import it
-        # into.
+        # The core's internal tests import the standard module list, so
+        # the list may import the modules it registers.
         dir-standard:
           files:
             - "**/standard/**"
           allow:
             - $gostd
+            - "github.com/mandesero/tt-wasm"
             - "github.com/stretchr/testify"
             - "github.com/tarantool/tt/modules/aeon"
             - "github.com/tarantool/tt/modules/build"
             - "github.com/tarantool/tt/modules/coredump"
             - "github.com/tarantool/tt/modules/emmylua"
-            - "github.com/tarantool/tt/modules/wasm"
             - "github.com/tarantool/tt/v3/standard"
         # The build backends of tt, each a package of the module build, are
         # written against the contract of a build backend alone, as the
@@ -449,20 +448,6 @@ linters:
             - "github.com/spf13/cobra"
             - "github.com/stretchr/testify"
             - "github.com/tarantool/tt/modules/coredump"
-            - "github.com/tarantool/tt/sdk"
-        # The module wasm, tt wasm and the check of the .wasm files, is
-        # written against the SDK alone, as any module is: nothing of the
-        # core, its own packages, and the libraries it needs.
-        dir-modules-wasm:
-          files:
-            - "**/modules/wasm/**"
-          allow:
-            - $gostd
-            - "github.com/spf13/cobra"
-            - "github.com/stretchr/testify"
-            # The rocks of a release are packed and read as LuaRocks does.
-            - "github.com/tarantool/go-luarocks"
-            - "github.com/tarantool/tt/modules/wasm"
             - "github.com/tarantool/tt/sdk"
         dir-internal-binary:
           files:

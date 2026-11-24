@@ -207,20 +207,21 @@ build makes programs`. A build that makes it anyway fails with exit code 2:
 A `.wasm` file a component lays out, or its build writes into `share/`, has
 to be a WebAssembly binary: a file of another kind fails the build, and a
 core module, which tarantool-wasm does not load, is laid out with a warning.
-The check is that of the standard module `wasm`. `tt wasm new` declares the
-components tarawasm builds; see
+The standard module `wasm` provides this check and the `wasm` backend used
+for components declared by `tt wasm new`. See
 [Run WebAssembly components](../how-to/wasm-components.md).
 
 ### `[components.NAME.build]`
 
 | Field | Backends | |
 | --- | --- | --- |
-| `backend` | | `c`, `lua-c` (modules); `go` (programs); `cargo`, `zig` (modules and programs); `cmake`, `make`, `shell` (modules, data files and programs) |
-| `cwd`, `env` | all | the directory the build runs in, its environment |
-| `output` | `make`, `shell`, `cmake` | the files the build makes, which tt copies where each goes, see below; required for `cmake` |
+| `backend` | | `c`, `lua-c` (modules); `go` (programs); `cargo`, `zig` (modules and programs); `cmake`, `make`, `shell` (modules, data files and programs); `wasm` (WebAssembly components) |
+| `cwd`, `env` | all except `wasm` | the directory the build runs in, its environment |
+| `output` | `make`, `shell`, `cmake`, `wasm` | the files included in the package; required for `cmake` and `wasm` |
 | `incremental` | `make`, `shell`, `zig` | `true` skips the build when its inputs are those of the last one and what it left is still there |
 | `make_target`, `entrypoint`, `flags` | `make` | `make_target` is required |
 | `command`, `args` | `shell` | `command` is required |
+| `language`, `source`, `wit`, `world`, `profile`, `args` | `wasm` | language, source and WIT paths relative to the component, selected world and toolchain profile. Optional `args.fetch`, `args.bind` and `args.build` pass lists of arguments to each phase |
 | `module`, `sources`, `include_dirs`, `libraries`, `library_dirs`, `rpath`, `defines` | `c`, `lua-c` | `module` and `sources` are required; an entry of `libraries` with a `/` or ending in `.a` is a library file |
 | `pkg_config` | `c`, `lua-c` | packages whose flags pkg-config gives, `["openssl", "libsasl2 >= 2.1"]`; see below |
 | `link` | `c`, `lua-c` | components of the package whose libraries the module links, what their `output` sends `to = "link"`; see below |
@@ -258,6 +259,7 @@ output = ["build/tool.so", { path = "build/tool", to = "bin" }]
 | Backend | `path` is relative to |
 | --- | --- |
 | `make`, `shell` | the working directory of the build: `cwd`, which is relative to the project, or the directory of the component when the block has no `cwd` |
+| `wasm` | the directory of the component |
 | `cmake` | the build tree, `_build/component/<component>/` of the project (`TT_BUILD_DIR`) |
 | a backend of a module | where its documentation says; a backend whose output tt copies takes it from the working directory, as `make` does |
 
@@ -271,8 +273,9 @@ fails it with exit code 2:
 An incremental build that is up to date takes the file again from the same
 place, and runs the build again when it is gone from there.
 
-`to` says where the file goes. tt puts it there under its base name - the
-directories of `path` are dropped - in the package. `tt package build`
+`to` says where the file goes. For `make`, `shell` and `cmake`, tt puts the
+file there under its base name. The `wasm` backend requires one `.wasm` data
+file and preserves its relative path under `share`. `tt package build`
 installs the package into `.rocks/` of the project, `tt package pack` packs
 that `.rocks/` into the archive, and `tt package install` installs it with
 the same paths: into `.rocks/` of a project, or of the version of the
@@ -295,9 +298,9 @@ whose files are programs. A program is checked as every program is.
 This differs from `include`, which lays files of the directory of the
 component out under their paths: `include = ["dist/calc.wasm"]` installs
 `share/tarantool/<namespace>/dist/calc.wasm`, and
-`output = { path = "dist/calc.wasm", to = "share" }` installs
-`share/tarantool/<namespace>/calc.wasm`. A file `output` names is not laid
-out unless `include` takes it as well.
+for `make`, `shell` and `cmake`, `output = { path = "dist/calc.wasm", to = "share" }`
+installs `share/tarantool/<namespace>/calc.wasm`. For `wasm`,
+`output = "dist/calc.wasm"` keeps the `dist/` directory.
 
 A package whose build makes a JSON file its Lua code reads:
 
@@ -959,8 +962,8 @@ the build made. See
 [Incremental builds](../concepts/packages.md#incremental-builds) and
 [Cleaning](../concepts/packages.md#cleaning).
 
-`.tarantool/bin` of the project, where `tt binary` and `tt wasm prepare`
-put the programs of the project, comes first on the `PATH` of a build and of
+`.tarantool/bin` of the project, where `tt binary` puts the programs of
+the project, comes first on the `PATH` of a build and of
 a hook: a `command` names such a program without `.env/activate.sh` sourced.
 A program is looked for in that `PATH` only: a block whose `env` sets
 `PATH` gets the programs of that `PATH` and of `.tarantool/bin`, and a

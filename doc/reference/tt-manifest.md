@@ -113,10 +113,10 @@ manifest's directory; `VERSION_LABEL` follows it.
 
 The standard modules are the modules of the core's repository that the
 official tt is built with: `aeon`, `build`, `coredump`, `emmylua` and `wasm`
-in tt 3.0.0-alpha.3. `build` has the build backends of tt (see
+in tt 3.0.0-alpha.3. `build` provides general-purpose build backends (see
 [the application manifest](app-manifest.md#componentsnamebuild)); the core
-has none of its own. `wasm` has `tt wasm` and the check of the `.wasm` files
-of a package. The package `standard` of the core,
+has none of its own. `wasm` provides the `tt wasm` commands, the `wasm`
+build backend and checks for `.wasm` files. The package `standard` of the core,
 `github.com/tarantool/tt/v3/standard`, lists
 them, so a distribution gets the ones a newer core adds without an edit of
 its manifest. They are built at the commit of the core, or from its checkout,

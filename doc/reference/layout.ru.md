@@ -44,32 +44,8 @@
 | `run/.../process.pid` | PID внешнего процесса |
 | `log/.../tt.log` | всё, что выводит экземпляр, и сообщения его процесса-наблюдателя |
 
-`tt wasm prepare` добавляет в корень проекта всё необходимое для сборки
-компонентов WebAssembly: tarawasm и утилиты, которые устанавливает tt, под
-`versions/`, с символическими ссылками в `bin/`, а с `--from` - ещё и
-`registry/`, rock-сервер с rock-пакетом `wasm` локальной сборки для текущей
-машины:
-
-```text
-.tarantool/
-├── bin/
-│   ├── tarawasm -> <root>/versions/tarawasm/tarawasm_<commit>/bin/tarawasm
-│   ├── wasm-tools -> <root>/versions/wasm-tools/wasm-tools_1.261.0/wasm-tools
-│   ├── wkg
-│   ├── componentize-py                   # в окружении tarawasm (Python)
-│   ├── tinygo, wasm-opt                  # Go
-│   └── wit-bindgen                       # C
-├── registry/
-│   ├── manifest
-│   └── wasm-0.1.0-1.linux-x86_64.rock
-└── versions/
-    ├── tarawasm/tarawasm_<commit>/       # виртуальное окружение Python
-    ├── wasm-tools/wasm-tools_1.261.0/
-    ├── wkg/wkg_0.16.1/
-    ├── tinygo/tinygo_0.43.0/             # с наложенным поверх Binaryen
-    ├── wasi-sdk/wasi-sdk_34/             # без ссылок: см. tarawasm.local.json ниже
-    └── wit-bindgen/wit-bindgen_0.62.0/
-```
+Команда `tt wasm prepare --from` создаёт rock-сервер для локальной сборки
+нативного модуля в `.tarantool/registry/` проекта.
 
 ## Проект {#a-project}
 
@@ -108,26 +84,25 @@ _build/
 
 ## Компонент WebAssembly {#a-webassembly-component}
 
-`tt wasm new router --lang python` создаёт проект tarawasm в каталоге `router/`:
+Команда `tt wasm new router --lang python` добавляет компонент в
+`app.manifest.toml`. Пути от корня проекта:
 
 ```text
-router/
-├── .gitignore                    # список файлов, генерируемых tarawasm; создаётся tt wasm new
-├── main.py                       # исходный код
-├── wit/
-│   ├── app.wit                   # world компонента с именем самого компонента
-│   └── deps/                     # WIT из состава SDK
-├── tarawasm.json                 # язык, world, результат сборки
-├── tarawasm.tarantool.lock.json  # релиз SDK, под который собирается компонент
-├── tarawasm.local.json           # пути к утилитам на текущей машине (C; генерируется)
-├── .tarawasm/                    # SDK, распакованный по tt wasm prepare (генерируется)
-├── wit_world/, poll_loop.py ...  # байндинги (генерируется)
-└── dist/router.wasm              # компонент (генерируется)
+wasm.lock.json                    # профили компонентов, зафиксированные SDK и образы
+wasm.local.json                   # настройки запуска на текущей машине (генерируется)
+components/router/
+├── .gitignore
+├── main.py                       # исходный код Python
+├── requirements.lock             # зафиксированные зависимости Python
+├── wit/app.wit                   # WIT world
+├── .tt-wasm/
+│   ├── cache/                    # SDK и зависимости от tt wasm fetch
+│   └── bindings/                 # привязки от tt wasm bind
+└── dist/router.wasm              # собранный компонент
 ```
 
-В репозиторий коммитят исходный код, каталог `wit/` вместе с `deps/`,
-`tarawasm.json`, `tarawasm.tarantool.lock.json` и `.gitignore`; всё остальное
-генерируется автоматически и исключается через `.gitignore`.
+Добавьте в Git исходники, манифест, локфайлы и `.gitignore`. Исключите
+локальные настройки запуска, кеш, привязки и результат сборки.
 
 ## Архив {#an-archive}
 

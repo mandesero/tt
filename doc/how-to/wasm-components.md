@@ -1,189 +1,139 @@
 # Run WebAssembly components (experimental)
 
-[tarantool-wasm](https://github.com/tarantool/tarantool-wasm-rs) is a
-Tarantool module that runs WebAssembly components next to the data:
-application code written in Python, JavaScript, Go, Rust, C or C# and called
-from Lua with `require('wasm')`. The components are built by
-[tarawasm](https://github.com/mandesero/tarawasm).
+[tarantool-wasm](https://github.com/tarantool/tarantool-wasm-rs) runs
+WebAssembly components inside Tarantool. Lua code uses them through
+`require('wasm')`. The standard `wasm` module of tt provides the
+`tt wasm` commands and the `wasm` build backend. This guide builds a Python
+function and calls it from Lua. For a full application, see
+[An HTTP API in a WebAssembly component](../write-your-app/http-api-in-wasm.md).
 
-`tt wasm prepare` sets a project up for both until tt builds the components
-itself, and `tt wasm new` adds a component to the package. `tt wasm` is
-`wasm`, one of the [standard modules](../concepts/distributions.md) of tt,
-which checks the `.wasm` files of a package too. They need Linux
-x86-64 or macOS arm64, Tarantool 3.6 or newer, and Python 3.10 or newer for
-tarawasm. Linux arm64 is not supported: tarantool-wasm has no build for it, so
-no rock server has a `wasm` rock to install there unless one packs a local
-build (`tt wasm rock --from`).
-
-This page builds a component in Python, `add(a, b)`, into a package named
-`myapp`. [An HTTP API in a WebAssembly component](../write-your-app/http-api-in-wasm.md)
-is a whole application: an HTTP server in a component, writing to a space.
+The runtime requires Tarantool 3.6 or newer on Linux x86-64 or macOS arm64.
 
 ## Prepare the project
 
-In a package directory, the one with `app.manifest.toml`:
+The default runner uses Docker. From the root of the tt checkout, download
+the [tt-wasm module](https://github.com/mandesero/tt-wasm) pinned in `go.mod`
+and build its Python toolchain image with the tt SDK:
 
 ```console
-$ tt wasm prepare --lang python
-declared wasm 0.1.0 from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-installing tarawasm
-...
-checking the python toolchain
-python toolchain:
-  python3          >=3.10.0           3.14.4     ok         /usr/bin/python3
-  wasm-tools       1.261.0            1.261.0    ok         .../.tarantool/bin/wasm-tools (installed by tt)
-  wkg              0.16.1             0.16.1     ok         .../.tarantool/bin/wkg (installed by tt)
-  componentize-py  0.25.1             0.25.1     ok         .../.tarantool/bin/componentize-py (installed by tt)
-...
-prepared for tarantool-wasm 0.1.0 (linux-x86_64)
-  rock:       from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-  tarawasm:   .tarantool/bin/tarawasm
-  toolchains: python
+$ go mod download github.com/mandesero/tt-wasm
+$ wasm_dir=$(go list -m -f '{{.Dir}}' github.com/mandesero/tt-wasm)
+$ docker build --build-context "tt-sdk=$PWD/sdk" --platform linux/amd64 \
+    --target python -t tt-wasm-builder:dev "$wasm_dir"
 ```
 
-The output of pip and of tarawasm goes in between, where `...` is. What the
-command did:
+In the application directory containing `app.manifest.toml`:
 
-- declared the `wasm` rock, the native module of the release, in the manifest
-  and re-resolved the lock:
+```console
+$ tt wasm prepare --lang python --image tt-wasm-builder:dev
+```
 
-    ```toml
-    [dependencies]
-    wasm = { version = "0.1.0", registry = "https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/" }
-    ```
-
-  The server is the [rock index](../concepts/rock-servers.md#a-rock-index) of
-  tarantool-contrib/rocks-repo, which serves the rock of every platform with
-  its sha256, so the lock pins them all and the next `tt package build`
-  installs the rock of this machine, checked against the lock;
-- installed tarawasm into a virtual environment under `.tarantool/versions/`
-  and linked it as `.tarantool/bin/tarawasm`;
-- put the Python toolchain in place, see below;
-- wrote `.env/activate.sh`, which puts `.tarantool/bin` on the `PATH` of
-  the shell.
-
-`.tarantool` belongs to this machine and is not committed. After a checkout,
-on another machine or in CI, `tt wasm prepare` puts it all back: tarawasm,
-the toolchain of every component and the SDK each component pins.
+`prepare` declares the `wasm` rock dependency, resolves the package lock,
+and checks the selected toolchain. The rock index serves builds of the
+native module for the runtime platforms. The Docker image has its own
+platform, `linux/amd64`, independent of the platform on which the app runs.
 
 ## The toolchains
 
-tarawasm drives the compilers of each language. Of those, tt installs into
-the project the tools it can take whole from their releases, each checked
-against the sha256 tt knows for it, under `.tarantool/versions/` with a link
-in `.tarantool/bin`:
+The Docker image provides the Python tools. To run them directly on the host,
+put these tools on `PATH`:
 
-| Tool | For | |
-| --- | --- | --- |
-| wasm-tools 1.261.0, wkg 0.16.1 | every language | the Bytecode Alliance releases |
-| componentize-py 0.25.1 | `python` | its wheel, which pip installs into the environment of tarawasm from the file tt downloaded |
-| TinyGo 0.43.0 with Binaryen 133 | `go` | Binaryen is laid over TinyGo, as TinyGo 0.43 needs its `wasm-opt`; `wasm-opt` is linked too |
-| wit-bindgen 0.62.0 | `c` | |
-| the wasi-sdk 34 | `c` | not linked into `.tarantool/bin`, where its `clang` would stand in for the compiler of the system in every build: each C component tells tarawasm where it is, in its `tarawasm.local.json` |
-
-The other tools are yours to install: tt checks their versions, says which
-to install, and installs nothing into the system.
-
-| Language | Tools you install |
+| Tool | Version |
 | --- | --- |
-| `python` | python3 3.10 or newer |
-| `go` | Go 1.25 to 1.27 |
-| `rust` | rustc and cargo 1.96 or newer with the target `wasm32-wasip1`, cargo-component 0.21.1 |
-| `js` | Node 24 or newer, jco 1.37.0 with componentize-js 0.23.0 and preview2-shim 0.17.8 |
-| `c` | nothing more |
-| `csharp` | the .NET SDK 10.0.402, on Linux x86-64 |
+| `python3` with pip | 3.10 or newer |
+| `componentize-py` | 0.25.1 |
+| `wasm-tools` | 1.261.0 |
+| `wkg` | 0.16.1 |
 
-A tool that is missing, or in a version that does not fit, stops the
-command with what to install:
+Then run:
 
 ```console
-$ tt wasm prepare --lang rust
-...
-   ⨯ the toolchain is not ready for rust; install, tt does not:
-       rustc >=1.96.0 (missing): rustup (https://rustup.rs), then rustup target add wasm32-wasip1
-       cargo >=1.96.0 (missing): rustup (https://rustup.rs)
-       cargo-component >=0.21.1 (missing): cargo install --locked cargo-component --version 0.21.1
+$ tt wasm prepare --lang python --runner local
 ```
 
-The toolchain is checked as a build finds it: `.tarantool/bin` first, then
-`PATH`. `tarawasm toolchain setup --install`, which installs the tools
-itself, runs `sudo apt-get install` on Linux and builds `wasm-tools` and
-`wkg` from source; tt never runs it.
+`prepare` checks local tools. Install or update them yourself when a check
+fails. Docker and local runners use the same sequence after preparation.
 
 ## Add a component
 
 ```console
 $ tt wasm new calc --lang python
-...
-added component calc in calc
+$ tt wasm prepare
+$ tt wasm fetch calc
 ```
 
-tarawasm creates the component in `calc/`, on the SDK of the `wasm`
-release the package declares, and `calc/.gitignore` keeps what it generates
-out of git. Its WIT world is named after it, and so is what it builds,
-`dist/calc.wasm`: the components of a package do not collide. The manifest
-declares the component:
+`new` puts the component in `components/calc/` and adds it to the manifest.
+The second `prepare` records the new component's toolchain profile, runtime
+version and SDK digest in `wasm.lock.json`. A Docker profile also pins the
+builder image. `fetch` downloads the SDK and any dependencies declared in
+`wkg.lock` and `requirements.lock`. Python requirements need exact versions
+and hashes of pure-Python wheels.
 
 ```toml
-# A WebAssembly component, made by tt wasm new and built by tarawasm.
 [components.calc]
-path = "calc"
-include = ["dist/calc.wasm"]
+path = "components/calc"
 
 [components.calc.build]
-backend = "shell"
-command = "tarawasm"
-args = ["all"]
-incremental = true
+backend = "wasm"
+language = "python"
+source = "main.py"
+wit = "wit"
+world = "calc"
+profile = "python-ttwasm-0.1.0-r1"
+output = "dist/calc.wasm"
 ```
 
-`tarawasm all` regenerates the bindings and builds `dist/calc.wasm`; a build
-finds tarawasm and the compilers in `.tarantool/bin` with or without
-`.env/activate.sh`. `incremental = true` skips the build while the sources,
-the WIT and the SDK lock of the component are those of the last one; after
-a new compiler, `tt package build --rebuild` builds it anyway. See
-[Incremental builds](../concepts/packages.md#incremental-builds). A Lua
-component of the project at `path = "."` takes
-every `*.so` below it by default: give it `exclude = ["calc/"]`.
+Commit `app.manifest.lock`, `wasm.lock.json`, the sources and any dependency
+lock files. Keep `wasm.local.json` and the generated `.tt-wasm/` and `dist/`
+directories out of version control. A locally built image is pinned by its
+Docker image ID and must be available in the Docker context on each builder.
 
-The SDK of a component is the one its `tarawasm.tarantool.lock.json` pins,
-and has to be of the release the package declares: a component builds
-against the WIT of its SDK, and the module serves the WIT of its own.
-`tt wasm prepare` refuses a component on another SDK, and `tt wasm status`
-lists it among what keeps the project from building; `tt package build`
-says nothing of it.
+## Other languages
+
+Use the same sequence for these language names. Set `--target` to the
+Dockerfile stage when building a toolchain image locally. The example
+builds the JavaScript calculator.
+
+```console
+$ docker build --build-context "tt-sdk=$PWD/sdk" --platform linux/amd64 \
+    --target js -t tt-wasm-builder:js "$wasm_dir"
+$ tt wasm prepare --lang js --image tt-wasm-builder:js
+$ tt wasm new calc --lang js
+$ tt wasm prepare
+$ tt wasm fetch calc
+$ tt wasm bind calc
+$ tt package build --locked
+```
+
+| `--lang` | Dockerfile stage | Local toolchain | Dependency files |
+| --- | --- | --- | --- |
+| `python` | `python` | Python 3.10+, pip, componentize-py 0.25.1 | `requirements.lock` |
+| `js` | `js` | Node.js 24+, Jco 1.37.0, ComponentizeJS 0.23.0 | `package-lock.json` |
+| `go` | `go` | Go 1.27.x, TinyGo 0.43.0, Binaryen 133, wit-bindgen-go 0.7.0 | `go.mod`, `go.sum` |
+| `rust` | `rust` | Rust 1.96+, cargo-component 0.21.1, `wasm32-wasip1` | `Cargo.lock` |
+| `c`, `cpp` | `c` | WASI SDK 34.0, wit-bindgen 0.62.0 | `wkg.lock` |
+| `csharp` | `csharp` | .NET SDK 10.0.402, WASI SDK 29.0, wit-bindgen 0.58.0 | `packages.lock.json` |
+
+All local toolchains also need `wasm-tools` 1.261.0 and `wkg` 0.16.1. For
+local C# builds use Linux amd64 and set `WASI_SDK_PATH` to the WASI SDK
+root. A project can also lock external WIT packages in `wkg.lock`.
 
 ## Write it
 
-`--template` starts a component in Python from an example: `call` is the one
-below, `http` the server of
-[An HTTP API in a WebAssembly component](../write-your-app/http-api-in-wasm.md);
-`tt wasm new` then prints the Lua module that uses the component.
-
-```console
-$ tt wasm new calc --lang python --template call
-```
-
-Without a template, add an export to the world in `calc/wit/app.wit`, where
-tarawasm writes it:
+The generated `components/calc/wit/app.wit` declares the export:
 
 ```wit
-package example:app@0.1.0;
+package example:calc@0.1.0;
 
 world calc {
-  include tarantool:tarantool/guest@0.2.0;
-  import docs:adder/ssl-bio@0.1.3;
-  export add: func(a: s32, b: s32) -> s32;
+    include tarantool:tarantool/guest@0.2.0;
+    export add: func(a: s32, b: s32) -> s32;
 }
 ```
 
-and implement it in `calc/main.py`, below the initialization tarawasm
-wrote:
+The generated `components/calc/main.py` implements it:
 
 ```python
-import twr_python_sdk
-twr_python_sdk.install(ports=['ssl', 'asyncio_dns'])
-
 import wit_world
 
 
@@ -192,38 +142,23 @@ class WitWorld(wit_world.WitWorld):
         return a + b
 ```
 
-See the [tarawasm guide](https://github.com/mandesero/tarawasm/blob/master/docs/tarantool.md)
-for the other languages and for the Tarantool API of a component.
+Use `tt wasm bind calc` to generate bindings in
+`components/calc/.tt-wasm/bindings/` for editing and inspection. A build
+generates the bindings it needs in a temporary directory.
 
 ## Build it and call it from Lua
 
 ```console
-$ tt package build
-$ find .rocks -name wasm.so -o -name '*.wasm'
-.rocks/lib/tarantool/wasm.so
-.rocks/share/tarantool/myapp/dist/calc.wasm
+$ tt package build --locked
 ```
 
-A `.wasm` file of the package - one a component lays out, or one its build
-writes into `share/` - has to be a WebAssembly binary: anything else fails
-the build, and a core module, which `require('wasm')` does not load, is laid
-out with a warning.
+Use `tt wasm build calc` to build just this component. On success the
+backend writes `components/calc/dist/calc.wasm` and places it under the
+package namespace in `.rocks/share/tarantool/myapp/dist/calc.wasm` for a
+package named `myapp`. A failed compilation or validation preserves the
+previous component.
 
-The component is a file of the package, under the namespace of the package.
-Load it by its path from the application directory, which is the working
-directory of the instances, in the project and in an installed version alike:
-
-```lua
-local wasm = require('wasm')
-
-local calc = wasm.load('.rocks/share/tarantool/myapp/dist/calc.wasm')
-assert(wasm.call(calc, 'add', 20, 22) == 42)
-
-local bound = wasm.bind(calc)
-assert(bound.add(1, 2) == 3)
-
-wasm.drop(calc)
-```
+From the application directory:
 
 ```console
 $ tt run -e "local wasm = require('wasm') \
@@ -232,117 +167,88 @@ $ tt run -e "local wasm = require('wasm') \
 42
 ```
 
-`os.exit()` ends the run: without it Tarantool goes on to read a script
-from the standard input, or opens its console in a terminal.
+`wasm.bind(calc)` gives Lua functions for the exports of the component.
+Use `wasm.drop(calc)` to release a component you no longer need.
 
-The module keeps the compiled components in `~/.cache/wasmtime` of the user
-Tarantool runs as, and goes on without that cache when it cannot write
-there.
+Docker runs `bind` and `build` without network access. For an offline
+package build or pack, fetch the component with `tt wasm fetch` and mirror
+the runtime rock. Use the version from `app.manifest.lock` and the source
+registry from the `wasm` dependency in `app.manifest.toml`. For the default
+registry and runtime version in this example:
+
+```console
+$ registry=https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
+$ tt package download wasm@0.1.0-1 --registry "$registry" --dir ./vendor-rocks
+$ tt wasm prepare --rock-server ./vendor-rocks
+$ tt package pack --locked --registry ./vendor-rocks
+```
+
+`prepare --rock-server` changes the runtime's explicit registry while keeping
+its version constraint. Download the other rock dependencies too when the
+application has them. See
+[A mirror for offline builds](../concepts/rock-servers.md#a-mirror-for-offline-builds).
 
 ## Check the project
 
-`tt wasm status` shows what `tt wasm prepare` put in place and a build
-needs, changing nothing: the `wasm` rock and its build for this machine,
-tarawasm, every component with the SDK it pins, and the toolchains. It fails
-on anything missing, as a check in CI does:
-
 ```console
 $ tt wasm status
-wasm:       0.1.0 from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-rock:       from https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/
-tarawasm:   .tarantool/bin/tarawasm
-component:  calc (python, SDK 0.1.0) in calc
-python toolchain:
-  ...
-ready
+$ tt wasm doctor --component calc
+$ tt wasm bind calc --check
 ```
+
+`status` reports the declared components, toolchain profiles, dependencies
+and bindings. `doctor` also checks the selected toolchain. `bind --check`
+detects missing, changed or outdated bindings.
 
 ## Pack it
 
-Pack with the dependencies, the default: the archive carries the module for
-the platform it is packed on, and the component.
+The default archive carries the component and its dependencies, including
+the runtime rock for the target platform. The example uses Linux x86-64.
 
 ```console
-$ tt package pack
-.../_build/pack/myapp-1.0.0-linux-amd64.tt
+$ tt package pack --locked
 $ tt package install _build/pack/myapp-1.0.0-linux-amd64.tt --scope user --yes
-installed myapp 1.0.0 into user scope
 ```
 
-An archive packed `--without-deps` is `-any.tt` when the package has no
-native files of its own: its installation fetches the `wasm` rock of the
-machine it is installed on from the rock server, checked against the lock
-of the archive.
+If you use `--without-deps`, installation gets the appropriate runtime rock
+from the rock server and checks it against the archive lock.
 
 ## Share the rock
 
-The rock index of tarantool-contrib/rocks-repo serves the rock of every
-platform. A rock server of your own does as well: `tt wasm rock` packs the
-rock of every build of a release, with the index that makes a directory a
-rock server:
+`tt wasm rock` creates a rock for each platform of a known runtime release
+and writes the files needed to serve the directory as a rock server:
 
 ```console
-$ tt wasm rock --out dist/rocks
-.../dist/rocks/wasm-0.1.0-1.linux-x86_64.rock
-.../dist/rocks/wasm-0.1.0-1.macosx-aarch64.rock
-.../dist/rocks/manifest
-.../dist/rocks/tt-rocks-index.json
+$ tt wasm rock --version 0.1.0 --out dist/rocks
 ```
 
-Serve the directory, or upload its files next to the assets of the release,
-and declare the dependency from there:
-
-```console
-$ tt wasm prepare --rock-server https://github.com/tarantool/tarantool-wasm-rs/releases/download/v0.1.0/
-...
-  rock:       from https://github.com/tarantool/tarantool-wasm-rs/releases/download/v0.1.0/
-```
-
-Any version a server serves is declared, whether tt knows the release or
-not. A local build of the module is packed for this machine alone, into
-`.tarantool/registry`, a rock server inside the project, and declared from
-there:
+Use `tt wasm prepare --rock-server URL` to declare the runtime rock from
+another server. To use a local runtime build:
 
 ```console
 $ tt wasm prepare --from target/release/libtarantool_wasm_rs.so
-reading the build in target/release/libtarantool_wasm_rs.so
-packed wasm-0.1.0-1.linux-x86_64.rock into .tarantool/registry
-declared wasm 0.1.0 from .tarantool/registry
-...
 ```
 
-The registry is on this machine only: run `tt wasm prepare --from` again
-after a checkout, and pack the package with its dependencies to install it
-elsewhere.
+The local build is packed into `.tarantool/registry` for the host platform.
+See the [release mirror format](../reference/environment.md#webassembly-components)
+to supply both runtime and SDK assets from a mirror.
 
 ## Commands and options
 
-| Command | |
+| Command | Purpose |
 | --- | --- |
-| `tt wasm prepare` | the `wasm` rock, tarawasm, the toolchains, the SDKs of the components |
-| `tt wasm new NAME --lang L` | a component |
-| `tt wasm status` | what a build lacks, changing nothing; fails when anything is |
-| `tt wasm rock --out DIR` | the rocks of every platform of a release, for a rock server |
+| `tt wasm prepare` | Declare the runtime dependency and prepare toolchain profiles |
+| `tt wasm new NAME --lang python` | Scaffold and declare a Python component |
+| `tt wasm fetch [NAME]` | Fetch pinned SDK and language dependencies |
+| `tt wasm bind [NAME] [--check]` | Generate or check language bindings |
+| `tt wasm build NAME` | Build one component |
+| `tt wasm status` | Report project state |
+| `tt wasm doctor [--component NAME] [--json]` | Check the project and toolchain |
+| `tt wasm clean [NAME]` | Remove generated outputs |
+| `tt wasm rock --out DIR` | Pack the runtime rocks for a rock server |
 
-- `--version` of `prepare` and `rock` selects the tarantool-wasm release:
-  any the rock server serves for `prepare`, one tt knows for
-  `prepare --from` and `rock`; `tt wasm prepare --help` lists those.
-- `--rock-server URL` of `prepare` declares the rock from that rock server,
-  the rock index of tarantool-contrib/rocks-repo by default.
-- `--from FILE` of `prepare` packs a local build of the module into
-  `.tarantool/registry` and declares the rock from there; of `rock`, packs
-  it into `--out` as the rock of `--arch`.
-- `--python` of `prepare` names the Python to install tarawasm with,
-  `--tarawasm` what pip installs instead of the tarawasm tt pins,
-  `--no-tarawasm` leaves it out, `--reinstall` installs it anew.
-- `--lang` of `prepare` puts the toolchain of `python`, `go`, `js`, `rust`,
-  `c` or `csharp` in place too; `new` requires it.
-- `--dir` of `new` is the directory of the component, `--world` the name of
-  its WIT world (the name of the component by default), and `--template`
-  `http` or `call`, for Python.
-
-The downloads are cached in the cache directory of the user,
-`~/.cache/tt/wasm` on Linux. `TT_WASM_RELEASES` names a JSON file of
-releases tt uses instead of the ones it knows, with the `base_url` of their
-assets: a mirror of them, for a network without the internet; its format is
-in [Environment variables](../reference/environment.md#webassembly-components).
+`new --dir` sets the component directory. `new --world` sets the name of
+the WIT world. `new --template` accepts `call` or `http` and displays a
+corresponding Lua example. Use `prepare --update` to accept a changed
+toolchain pin. Use `tt wasm build NAME -- --help` for the underlying
+build tool's help.

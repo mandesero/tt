@@ -1082,7 +1082,6 @@ replace (
 	github.com/tarantool/tt/modules/aeon => ../tt/modules/aeon
 	github.com/tarantool/tt/modules/build => ../tt/modules/build
 	github.com/tarantool/tt/modules/emmylua => ../tt/modules/emmylua
-	github.com/tarantool/tt/modules/wasm => ../tt/modules/wasm
 	github.com/tarantool/tt/sdk => ../tt/sdk
 	github.com/tarantool/tt/sdk/backup => ../tt/sdk/backup
 	github.com/tarantool/tt/sdk/build => ../tt/sdk/build
@@ -1177,7 +1176,6 @@ go work edit \
     -replace github.com/tarantool/tt/modules/aeon=../tt/modules/aeon \
     -replace github.com/tarantool/tt/modules/build=../tt/modules/build \
     -replace github.com/tarantool/tt/modules/emmylua=../tt/modules/emmylua \
-    -replace github.com/tarantool/tt/modules/wasm=../tt/modules/wasm \
     -replace github.com/tarantool/tt/sdk=../tt/sdk \
     -replace github.com/tarantool/tt/sdk/backup=../tt/sdk/backup \
     -replace github.com/tarantool/tt/sdk/build=../tt/sdk/build \
