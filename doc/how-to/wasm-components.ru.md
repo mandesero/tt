@@ -336,6 +336,30 @@ $ tt wasm prepare --from target/release/libtarantool_wasm_rs.so
 `.tarantool/registry`. Чтобы брать нативные модули и SDK с зеркала, см.
 [формат списка релизов](../reference/environment.md#webassembly-components).
 
+### Проверка runtime и SDK из одного checkout
+
+Для CI соберите wheel и разрешённые зависимости WIT из checkout в архив
+`.tar.gz` с той же структурой, что у релизного SDK. Под корневым каталогом
+архива для Python должны быть `packages/python/twr_python_sdk-*.whl` и
+`wit/python/deps/`. Соберите нативный модуль из того же checkout и передайте
+оба артефакта при подготовке тестового проекта. Используйте образ сборщика,
+выбранный в начале руководства.
+
+```console
+$ tt wasm prepare --lang python --image "$image" \
+    --from ./artifacts/wasm.so --sdk-from ./artifacts/sdk.tar.gz
+$ tt wasm new calc --lang python
+$ tt wasm prepare
+$ tt wasm build calc --fetch
+```
+
+`--lang python` выбирает архив для компонентов Python. `prepare` сохраняет
+архив в локальном кэше Wasm и фиксирует его SHA-256 в `wasm.lock.json`.
+Повторный `prepare` использует этот выбор для нового компонента. На другой
+машине передайте тот же архив в `prepare --sdk-from`, чтобы восстановить
+копию в кэше. Для перехода на архив с другой контрольной суммой добавьте
+`--update`.
+
 ## Команды и параметры {#commands-and-options}
 
 | Команда | Назначение |

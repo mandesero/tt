@@ -6268,6 +6268,8 @@ FLAGS
                                and [platform].registries)
       --rock-server string     rock server to use for the wasm runtime
       --runner string          toolchain runner: local or docker
+      --sdk-from string        use this local Tarantool Wasm SDK archive for the
+                               selected languages
       --update                 update locked WebAssembly profiles
       --version string         tarantool-wasm runtime version
 

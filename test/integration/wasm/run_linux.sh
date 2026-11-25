@@ -73,6 +73,10 @@ for language in "$@"; do
     export "$image_var=$image"
     cases+=("$test_file::${test_name}[$language]")
     filters+=("${test_name}[$language]")
+    if [[ $language == python ]]; then
+        cases+=("$test_file::test_python_uses_a_local_sdk_and_runtime")
+        filters+=("test_python_uses_a_local_sdk_and_runtime")
+    fi
 done
 
 if [[ -n ${TT_TEST_TARANTOOL:-} ]]; then

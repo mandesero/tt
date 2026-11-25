@@ -13,7 +13,7 @@ require (
 	github.com/jedib0t/go-pretty/v6 v6.7.8
 	github.com/klauspost/compress v1.20.3
 	github.com/magefile/mage v1.15.0
-	github.com/mandesero/tt-wasm v0.1.1-0.20261125093726-8c2017d3cf66
+	github.com/mandesero/tt-wasm v0.1.1-0.20261125110632-e47ba3cd55fe
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d

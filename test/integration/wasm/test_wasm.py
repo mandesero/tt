@@ -623,6 +623,76 @@ def test_component_calls_from_installed_package(tt_cmd, tmp_path, language, imag
     call_add(tt_cmd, installed, installed_component(project, installed), "20, 22, 6", 48, env)
 
 
+@pytest.mark.docker
+def test_python_uses_a_local_sdk_and_runtime(tt_cmd, tmp_path):
+    image = os.environ.get("TT_WASM_TEST_PYTHON_IMAGE")
+    if not image:
+        pytest.skip("set TT_WASM_TEST_PYTHON_IMAGE to a Python builder image")
+
+    _, _, arch, module = host_platform()
+    project = tmp_path / "app"
+    project.mkdir()
+    env = {**os.environ, "XDG_CACHE_HOME": str(tmp_path / "cache")}
+    registry = env.get(
+        "TT_WASM_TEST_RUNTIME_ROCK_SERVER",
+        "https://raw.githubusercontent.com/tarantool-contrib/rocks-repo/index/",
+    )
+    rocks = tmp_path / "rocks"
+    runtime = tmp_path / module
+    sdk_archive = tmp_path / "python-sdk.tar.gz"
+
+    run(tt_cmd, project, "new", env=env)
+    run(
+        tt_cmd,
+        project,
+        "package",
+        "download",
+        "wasm@0.1.0-1",
+        "--registry",
+        registry,
+        "--dir",
+        str(rocks),
+        env=env,
+    )
+    with ZipFile(rocks / f"wasm-0.1.0-1.{arch}.rock") as rock:
+        runtime.write_bytes(rock.read(f"lib/{module}"))
+
+    write_local_python_sdk(sdk_archive)
+    prepare_component(
+        tt_cmd,
+        project,
+        "python",
+        image,
+        "--from",
+        str(runtime),
+        "--sdk-from",
+        str(sdk_archive),
+        env=env,
+    )
+    lock = json.loads((project / "wasm.lock.json").read_text())
+    assert lock["components"]["calc"]["sdk_sha256"] == sha256_of(sdk_archive)
+
+    guest = project / "components" / "calc"
+    (guest / "wit" / "app.wit").write_text(
+        "package sdk-test:component;\n"
+        "world calc {\n"
+        "    use sdk-test:local/types.{amount};\n"
+        "    export add: func(a: s32, b: s32) -> amount;\n"
+        "}\n",
+    )
+    (guest / "main.py").write_text(
+        "from local_sdk_probe import OFFSET\n"
+        "import wit_world\n\n"
+        "class WitWorld(wit_world.WitWorld):\n"
+        "    def add(self, a: int, b: int) -> int:\n"
+        "        return a + b + OFFSET\n",
+    )
+
+    run(tt_cmd, project, "wasm", "build", "calc", "--fetch", env=env)
+    assert installed_module(project) == runtime.read_bytes()
+    call_add(tt_cmd, project, installed_component(project), "20, 22", 49, env)
+
+
 @pytest.mark.parametrize("language", COMPONENT_SOURCES)
 def test_local_component_development(tt_cmd, tmp_path, language):
     env_var = f"TT_WASM_TEST_{language.upper()}_LOCAL_ENV"
@@ -773,27 +843,58 @@ def change_npm_dependencies(tt_cmd, project, guest, artifact, image, env):
     call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
 
 
-def write_dev_wheel(guest: Path, bonus: int) -> str:
-    """Write a pure-Python wheel that pip can install without an index."""
-    name = "tt_wasm_dev_example"
-    version = f"{bonus}.0"
-    metadata = f"{name}-{version}.dist-info"
-    wheel = f"{name}-{version}-py3-none-any.whl"
+def write_local_python_sdk(path: Path):
+    """Create a release-layout archive with a wheel and WIT unique to this test."""
+    wheel = io.BytesIO()
+    write_wheel(
+        wheel,
+        "twr_python_sdk",
+        "0.1.0",
+        {
+            "local_sdk_probe.py": "OFFSET = 7\n",
+            # This fixture does not use sockets.
+            "twr_python_sdk/_guest/patch_wasi_socket_errors.py": "",
+        },
+    )
     files = {
-        f"{name}.py": f"BONUS = {bonus}\n",
+        "packages/python/twr_python_sdk-0.1.0-py3-none-any.whl": wheel.getvalue(),
+        "wit/python/deps/local/package.wit": (
+            b"package sdk-test:local;\ninterface types { type amount = s32; }\n"
+        ),
+    }
+    with tarfile.open(path, "w:gz") as archive:
+        for name, data in files.items():
+            info = tarfile.TarInfo(f"sdk/{name}")
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+
+def write_wheel(target: Path | io.BytesIO, name: str, version: str, modules: dict[str, str]):
+    """Write a pure-Python wheel that pip can install without an index."""
+    project_name = name.replace("_", "-")
+    metadata = f"{name}-{version}.dist-info"
+    files = {
+        **modules,
         f"{metadata}/METADATA": (
-            f"Metadata-Version: 2.1\nName: tt-wasm-dev-example\nVersion: {version}\n"
+            f"Metadata-Version: 2.1\nName: {project_name}\nVersion: {version}\n"
         ),
         f"{metadata}/WHEEL": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
     }
     record = []
-    with ZipFile(guest / wheel, "w") as archive:
+    with ZipFile(target, "w") as archive:
         for path, text in files.items():
             content = text.encode()
             digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
             record.append(f"{path},sha256={digest},{len(content)}\n")
             archive.writestr(path, content)
         archive.writestr(f"{metadata}/RECORD", "".join(record) + f"{metadata}/RECORD,,\n")
+
+
+def write_dev_wheel(guest: Path, bonus: int) -> str:
+    name = "tt_wasm_dev_example"
+    version = f"{bonus}.0"
+    wheel = f"{name}-{version}-py3-none-any.whl"
+    write_wheel(guest / wheel, name, version, {f"{name}.py": f"BONUS = {bonus}\n"})
     return wheel
 
 

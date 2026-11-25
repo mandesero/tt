@@ -329,6 +329,28 @@ The local build is packed into `.tarantool/registry` for the host platform.
 See the [release mirror format](../reference/environment.md#webassembly-components)
 to supply both runtime and SDK assets from a mirror.
 
+### Test a runtime and SDK from the same checkout
+
+For SDK CI, pack the checkout's wheel and resolved WIT in the same `.tar.gz`
+layout as a released SDK. Under the archive's top-level directory, Python
+uses `packages/python/twr_python_sdk-*.whl` and `wit/python/deps/`. Build the
+native runtime from the same checkout, then prepare the test project with
+both artifacts. Use the builder image selected earlier in this guide.
+
+```console
+$ tt wasm prepare --lang python --image "$image" \
+    --from ./artifacts/wasm.so --sdk-from ./artifacts/sdk.tar.gz
+$ tt wasm new calc --lang python
+$ tt wasm prepare
+$ tt wasm build calc --fetch
+```
+
+`--lang python` selects the archive for Python components. `prepare` imports
+the archive into the local Wasm cache and pins its SHA-256 in `wasm.lock.json`.
+The second `prepare` reuses that selection for the new component. On another
+machine, pass the same archive to `prepare --sdk-from` to restore the cached
+copy. To use an archive with a new digest, pass `--update` as well.
+
 ## Commands and options
 
 | Command | Purpose |
