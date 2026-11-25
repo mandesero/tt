@@ -6158,6 +6158,7 @@ COMMANDS
   prepare     Prepare the runtime dependency and WebAssembly toolchains
   rock        Pack the rocks of a release for a rock server
   status      Report the runtime dependency, locked profiles and generated files
+  tool        Run a command in the component's Docker toolchain
 
 FLAGS
   -h, --help   help for wasm
@@ -6182,6 +6183,8 @@ USAGE
   tt wasm build NAME [-- TOOL_ARG...] [flags]
 
 FLAGS
+      --dev             use the Python development environment in Docker
+      --fetch           fetch locked dependencies before building
   -h, --help            help for build
   -j, --jobs N          run at most N jobs at once in each component build: the
                         compiles of c and lua-c, cmake --build --parallel, cargo
@@ -6313,6 +6316,16 @@ USAGE
 
 FLAGS
   -h, --help   help for status
+
+=== tt wasm tool --help
+Run a command in the component's Docker toolchain
+
+USAGE
+  tt wasm tool NAME -- COMMAND [ARG...] [flags]
+
+FLAGS
+  -h, --help            help for tool
+      --runner string   override the configured runner with Docker
 
 === tt completion bash
 # bash completion V2 for tt                                   -*- shell-script -*-

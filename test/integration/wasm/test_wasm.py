@@ -7,6 +7,7 @@ build lays out. The Python builder flow uses a stand-in for Docker, and a
 real image exercises the runtime when supplied explicitly.
 """
 
+import base64
 import functools
 import hashlib
 import http.server
@@ -23,6 +24,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -650,7 +652,15 @@ def develop_component(tt_cmd, tmp_path, language, image, toolchain_env=None):
     runtime = ("--rock-server", str(Path(mirror).resolve())) if mirror else ()
     run(tt_cmd, project, "new", env=env)
     prepare_component(tt_cmd, project, language, image, *runtime, env=env)
-    run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
+    if image is not None and language in ("go", "rust"):
+        manifest = "go.mod" if language == "go" else "Cargo.toml"
+        sdk_manifest = f".tt-wasm/bindings/tarantool-sdk/{manifest}"
+        assert not (project / "components" / "calc" / sdk_manifest).exists()
+        run(tt_cmd, project, "wasm", "tool", "calc", "--", "test", "-f", sdk_manifest, env=env)
+    elif image is not None and language == "python":
+        run(tt_cmd, project, "wasm", "tool", "calc", "--", "pip", "--version", env=env)
+    else:
+        run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
     run(tt_cmd, project, "wasm", "bind", "calc", env=env)
     run(tt_cmd, project, "wasm", "bind", "calc", "--check", env=env)
 
@@ -708,9 +718,11 @@ def develop_component(tt_cmd, tmp_path, language, image, toolchain_env=None):
     run(tt_cmd, project, "wasm", "bind", "calc", env=env)
     run(tt_cmd, project, "wasm", "build", "calc", "--rebuild", env=env)
     call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
-    assert [lock.read_bytes() for lock in locks] == original_locks
     if language == "js":
         change_npm_dependencies(tt_cmd, project, guest, artifact, image, env)
+    if language == "python" and image is not None:
+        change_python_dev_dependencies(tt_cmd, project, guest, artifact, env)
+    assert [lock.read_bytes() for lock in locks] == original_locks
 
     return project, env
 
@@ -719,30 +731,14 @@ def change_npm_dependencies(tt_cmd, project, guest, artifact, image, env):
     source = guest / "main.js"
     lock = guest / "package-lock.json"
     code = source.read_text()
-    cli = ["npm"]
-    if image is not None:
-        cli = [
-            "docker",
-            "run",
-            "--rm",
-            "--pull=never",
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "--env",
-            "HOME=/tmp",
-            "--entrypoint",
-            "npm",
-            "--workdir",
-            "/guest",
-            "--mount",
-            f"type=bind,source={guest},target=/guest",
-            "--",
-            image,
-        ]
 
     def npm(*args):
+        options = ("--ignore-scripts", "--no-audit", "--no-fund")
+        if image is not None:
+            run(tt_cmd, project, "wasm", "tool", "calc", "--", "npm", *args, *options, env=env)
+            return
         result = subprocess.run(
-            [*cli, *args, "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"],
+            ["npm", *args, "--package-lock-only", *options],
             cwd=guest,
             env=env,
             text=True,
@@ -762,17 +758,78 @@ def change_npm_dependencies(tt_cmd, project, guest, artifact, image, env):
         packages = json.loads(before)["packages"]
         assert packages["node_modules/camelcase-keys"]["version"] == version
         assert "node_modules/map-obj" in packages
+        if image is not None:
+            assert (guest / "node_modules" / "camelcase-keys" / "package.json").is_file()
         stale = tt(tt_cmd, project, "wasm", "build", "calc", env=env)
         assert stale.returncode != 0 and "run tt wasm fetch" in stale.stderr
-        run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
-        run(tt_cmd, project, "wasm", "build", "calc", env=env)
+        run(tt_cmd, project, "wasm", "build", "calc", "--fetch", env=env)
         call_add(tt_cmd, project, artifact, "20, 22, 6", 49, env)
         assert lock.read_bytes() == before
 
     npm("uninstall", "camelcase-keys")
     assert "node_modules/map-obj" not in json.loads(lock.read_bytes())["packages"]
     source.write_text(code)
-    run(tt_cmd, project, "wasm", "fetch", "calc", env=env)
-    run(tt_cmd, project, "wasm", "bind", "calc", env=env)
-    run(tt_cmd, project, "wasm", "build", "calc", env=env)
+    run(tt_cmd, project, "wasm", "build", "calc", "--fetch", env=env)
     call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
+
+
+def write_dev_wheel(guest: Path, bonus: int) -> str:
+    """Write a pure-Python wheel that pip can install without an index."""
+    name = "tt_wasm_dev_example"
+    version = f"{bonus}.0"
+    metadata = f"{name}-{version}.dist-info"
+    wheel = f"{name}-{version}-py3-none-any.whl"
+    files = {
+        f"{name}.py": f"BONUS = {bonus}\n",
+        f"{metadata}/METADATA": (
+            f"Metadata-Version: 2.1\nName: tt-wasm-dev-example\nVersion: {version}\n"
+        ),
+        f"{metadata}/WHEEL": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    }
+    record = []
+    with ZipFile(guest / wheel, "w") as archive:
+        for path, text in files.items():
+            content = text.encode()
+            digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).decode().rstrip("=")
+            record.append(f"{path},sha256={digest},{len(content)}\n")
+            archive.writestr(path, content)
+        archive.writestr(f"{metadata}/RECORD", "".join(record) + f"{metadata}/RECORD,,\n")
+    return wheel
+
+
+def change_python_dev_dependencies(tt_cmd, project, guest, artifact, env):
+    source = guest / "main.py"
+    lock = guest / "requirements.lock"
+    before = lock.read_bytes()
+    source.write_text(
+        "try:\n"
+        "    from tt_wasm_dev_example import BONUS\n"
+        "except ModuleNotFoundError:\n"
+        "    BONUS = 0\n\n"
+        + source.read_text().replace("a + b + offset", "a + b + offset + BONUS"),
+    )
+
+    def pip(*args):
+        run(tt_cmd, project, "wasm", "tool", "calc", "--", "pip", *args, env=env)
+
+    first = write_dev_wheel(guest, 1)
+    second = write_dev_wheel(guest, 2)
+    pip("install", "--no-index", first)
+    run(tt_cmd, project, "wasm", "build", "calc", "--dev", "--fetch", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 49, env)
+
+    pip("install", "--no-index", "--upgrade", second)
+    run(tt_cmd, project, "wasm", "build", "calc", "--dev", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 50, env)
+
+    pip("uninstall", "--yes", "tt-wasm-dev-example")
+    run(tt_cmd, project, "wasm", "build", "calc", "--dev", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
+
+    pip("install", "--no-index", second)
+    run(tt_cmd, project, "package", "build", "--locked", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 48, env)
+    # Leave a development artifact in place for the following pack test.
+    run(tt_cmd, project, "wasm", "build", "calc", "--dev", env=env)
+    call_add(tt_cmd, project, artifact, "20, 22, 6", 50, env)
+    assert lock.read_bytes() == before

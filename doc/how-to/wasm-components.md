@@ -129,28 +129,35 @@ root. A project can also lock external WIT packages in `wkg.lock`.
 
 ## Change dependencies
 
-Use the language's package manager in the component directory to update its
-manifest and lockfile. Commit both. Return to the application directory and
-run `tt wasm fetch calc` before binding or building with the new dependencies.
-For example, use `npm install --package-lock-only lodash-es@4.17.23` to add
-a JavaScript dependency, or `cargo add serde@1.0.228` in a Rust component.
-Go and Rust package managers need the SDK published by `tt wasm bind`.
-In an older Rust component that refers to `.tt-wasm-sdk-rust` in
-`Cargo.toml`, update the SDK path to `.tt-wasm/bindings/tarantool-sdk` and
-run `tt wasm fetch calc` and `tt wasm bind calc` before editing locks with
-Cargo.
-For C#, regenerate the NuGet lockfile after changing references with
-`dotnet restore -p:RestoreLockedMode=false`.
+`tt wasm tool` runs a command from the component directory in its pinned
+Docker image. Run it from the application directory. For example, add a
+JavaScript dependency and build with the updated lockfile.
 
-Python's `requirements.lock` must pin and hash every wheel, including
-transitive dependencies. The supported wheels are pure Python and must
-install for the guest Python version. JavaScript fetch installs production
-dependencies from the lockfile with npm lifecycle scripts disabled. C and
-C++ can use headers supplied with the component or WASI-compatible libraries
-compiled separately and passed to Clang through the component's build
-arguments. Build the libraries for WASI Preview 2 with the WASI SDK and
-place the headers and archives in the component. Relative compiler and
-linker paths are resolved from the component directory in both runners.
+```console
+$ tt wasm tool calc -- npm install --ignore-scripts lodash-es@4.17.23
+$ tt wasm build calc --fetch
+```
+
+`--fetch` prepares the locked dependencies before the build. Commit the
+updated manifest and lockfile. Open a shell with `tt wasm tool calc -- sh`.
+With a local toolchain, run the package manager in the component directory.
+
+Use `go get` for Go and `cargo add` for Rust. `tool` prepares their SDK on a
+clean checkout. With a local toolchain, do this with `tt wasm fetch calc`
+and `tt wasm bind calc`. For older Rust components, update `.tt-wasm-sdk-rust`
+in `Cargo.toml` to `.tt-wasm/bindings/tarantool-sdk` before generating the SDK.
+
+For C#, use `dotnet package add`. If `.csproj` sets `RestoreLockedMode` to
+`true`, pass `--no-restore` and refresh the lockfile yourself. To refresh it,
+including after `dotnet package remove`, run
+`dotnet restore -p:RestoreLockedMode=false -p:Configuration=Release`.
+
+JavaScript fetch installs production dependencies from the lockfile with
+npm lifecycle scripts disabled. For C and C++, build libraries for WASI
+Preview 2 with the WASI SDK. Place the headers and archives in the
+component and pass them to Clang through the component's build arguments.
+Relative compiler and linker paths resolve from the component directory
+in both runners.
 
 ```toml
 [components.calc.build.args]
@@ -175,6 +182,27 @@ previously pinned image. The `--runner` option on `fetch`, `bind`, or
 `build` selects a runner for that invocation. Each runner has a separate
 dependency cache. Run `tt wasm bind` again for the active runner before
 checking its generated bindings.
+
+### Try a Python package in Docker
+
+```console
+$ tt wasm tool calc -- pip install python-dateutil
+$ tt wasm build calc --dev
+```
+
+On first use, `tool` seeds the component's virtual environment from
+`requirements.lock`. Subsequent `tool` and `build --dev` calls reuse the
+environment, so you can run `pip install --upgrade` and `pip uninstall`.
+`--fetch` refreshes only the locked build cache. Use pure-Python wheels
+compatible with the guest Python version.
+If a package copied from the locked cache provides a console command, run
+`pip install --force-reinstall` for that package in the environment to
+create its entry point.
+
+To share a dependency or include it in a package, record exact versions and
+wheel hashes for it and its transitive dependencies in `requirements.lock`.
+Commit the lockfile and run `tt wasm build calc --fetch` for a build from it.
+`tt package build` and `tt package pack` use the locked dependencies.
 
 ## Write it
 
@@ -237,9 +265,10 @@ installed runtime through the standard search path.
 `wasm.bind(calc)` gives Lua functions for the exports of the component.
 Use `wasm.drop(calc)` to release a component you no longer need.
 
-Docker runs `bind` and `build` without network access. For an offline
-package build or pack, fetch the component with `tt wasm fetch` and mirror
-the runtime rock. Use the version from `app.manifest.lock` and the source
+Docker runs `bind` and compilation without network access. `build --fetch`
+can use the network during its fetch step. For an offline package build or
+pack, fetch the component with `tt wasm fetch` and mirror the runtime rock.
+Use the version from `app.manifest.lock` and the source
 registry from the `wasm` dependency in `app.manifest.toml`. For the default
 registry and runtime version in this example:
 
